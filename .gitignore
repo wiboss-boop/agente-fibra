@@ -1,0 +1,9 @@
+config/credentials.yaml
+config/google_oauth_credentials.json
+config/token.json
+downloads/
+logs/
+venv/
+__pycache__/
+*.pyc
+.env
