@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Corre el agente-fibra automáticamente a las 18:00 hora de Bogotá (UTC-5)
-equivalente a las 23:00 UTC.
+equivalente a las 21:00 UTC.
 """
 import schedule
 import time
@@ -32,10 +32,10 @@ def run_agente():
     except Exception as e:
         logger.error("Error: %s", e)
 
-# 23:00 UTC = 18:00 Bogotá
-schedule.every().day.at("23:00").do(run_agente)
+# 21:00 UTC = 18:00 Bogotá
+schedule.every().day.at("21:00").do(run_agente)
 
-logger.info("Scheduler iniciado. Agente correrá a las 18:00 Bogotá (23:00 UTC)")
+logger.info("Scheduler iniciado. Agente correrá a las 18:00 Bogotá (21:00 UTC)")
 
 while True:
     schedule.run_pending()
