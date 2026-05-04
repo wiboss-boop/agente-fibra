@@ -9,7 +9,7 @@ if credentials_yaml:
         f.write(credentials_yaml)
 
 # Instalar playwright browsers
-os.system("playwright install chromium --with-deps")
+os.system("playwright install chromium --with-deps || playwright install chromium")
 
 # Arrancar scheduler
 os.execlp("python", "python", "scheduler.py")
