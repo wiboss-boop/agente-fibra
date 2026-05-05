@@ -151,35 +151,45 @@ def _logout(page: Page) -> None:
 
 def _get_order_ids(page: Page, target_date: date) -> List[str]:
     """
-    El dashboard muestra las órdenes del día directamente.
-    Los IDs están en href con formato /Dashboard/Detalle?codigoOt=XXXX.
-    Para fechas pasadas intenta /Dashboard/Listado.
+    Navega al Dashboard y usa el botón #previous-day-button para llegar
+    a la fecha objetivo. Si es hoy, carga directamente.
     """
-    if target_date == date.today():
-        # El dashboard carga las órdenes vía AJAX; esperar al primer enlace de orden
+    today = date.today()
+    days_back = (today - target_date).days
+
+    # Esperar a que el dashboard cargue
+    try:
+        page.wait_for_selector("#header_listado", state="visible", timeout=15_000)
+    except PWTimeout:
+        pass
+
+    # Navegar hacia atrás los días necesarios
+    for _ in range(days_back):
         try:
-            page.wait_for_selector("a[href*='codigoOt']", state="attached", timeout=15_000)
-        except PWTimeout:
-            pass  # Sin órdenes hoy o página vacía
-        return _extract_order_ids_from_page(page)
+            page.evaluate("document.getElementById('previous-day-button').click()")
+            page.wait_for_timeout(1_500)
+        except Exception as e:
+            logger.warning("Orange: no se pudo navegar al día anterior: %s", e)
+            break
 
-    # Fechas pasadas: navegar al listado
-    date_str = target_date.strftime("%d/%m/%Y")
-    page.goto(f"{_BASE_URL}/Dashboard/Listado", timeout=_TIMEOUT)
-    page.wait_for_load_state("networkidle", timeout=_TIMEOUT)
+    # Esperar a que carguen las órdenes
+    try:
+        page.wait_for_selector("a[href*='codigoOt']", state="attached", timeout=15_000)
+    except PWTimeout:
+        pass
 
-    date_filter = page.locator("input[placeholder*='echa'], input[name*='echa'], input[type='date']")
-    if date_filter.count() > 0:
-        date_filter.first.fill(date_str)
-        search = page.locator("button:has-text('Buscar'), button:has-text('Filtrar'), button[type='submit']")
-        if search.count() > 0:
-            search.first.click()
-            page.wait_for_load_state("networkidle", timeout=_TIMEOUT)
+    # Verificar la fecha mostrada
+    try:
+        shown = page.locator("#current-day-title").inner_text(timeout=3_000).strip()
+        date_str = target_date.strftime("%d/%m/%Y")
+        if shown and date_str not in shown:
+            logger.warning("Orange: fecha mostrada '%s' no coincide con objetivo '%s'", shown, date_str)
+    except Exception:
+        pass
 
     ids = _extract_order_ids_from_page(page)
     if not ids:
-        logger.warning("Orange: no se encontraron órdenes para %s en el Listado. "
-                       "El dashboard solo muestra el día actual.", date_str)
+        logger.warning("Orange: no se encontraron órdenes para %s.", target_date.strftime("%d/%m/%Y"))
     return ids
 
 
