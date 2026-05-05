@@ -92,13 +92,22 @@ def _detect_pdf_type(text: str) -> str:
 def _find_field(text: str, *labels: str) -> Optional[str]:
     """
     Busca el primer label que aparezca en el texto y devuelve su valor.
-    Soporta formatos: "Label: valor" o "Label valor" (en la misma línea).
+    Soporta formatos:
+      - "Label: valor"  (mismo línea)
+      - "Label:\n• valor"  (valor en línea siguiente con bullet)
     """
     for label in labels:
         pattern = rf'{re.escape(label)}\s*:?\s*([^\n]+)'
         match = re.search(pattern, text, re.IGNORECASE)
         if match:
             value = match.group(1).strip()
+            if value:
+                return value
+        # Valor en línea siguiente con bullet (• o -)
+        pattern2 = rf'{re.escape(label)}\s*:?\s*\n\s*[•\-]\s*([^\n]+)'
+        match2 = re.search(pattern2, text, re.IGNORECASE)
+        if match2:
+            value = match2.group(1).strip().lstrip('•\-– ').strip()
             if value:
                 return value
     return None
@@ -185,7 +194,23 @@ def _codigo_kairos(text: str) -> Tuple[Optional[str], bool]:
     if "reutilizada" in tipo_lower:
         return "MM17", False
 
+    # Intentar extraer metros del propio campo
     meters = _extract_meters(tipo_raw)
+
+    # Si no hay metros en el campo tipo, buscar en "Longitud exterior"
+    if meters is None and ("nueva" in tipo_lower or "exterior" in tipo_lower):
+        longitud_raw = _find_field(text, "Longitud exterior", "Longitud acometida", "Longitud")
+        if longitud_raw:
+            meters = _extract_meters(longitud_raw)
+            if meters is None:
+                import re as _re
+                longitud_clean = longitud_raw.strip().lstrip("•\-– ").strip()
+                m = _re.match(r"(\d+(?:[.,]\d+)?)", longitud_clean)
+                if m:
+                    meters = float(m.group(1).replace(",", "."))
+        # Sin longitud especificada: asumir MM01 (<=20m)
+        return _meters_to_code(meters if meters is not None else 20), False
+
     if meters is not None:
         return _meters_to_code(meters), False
 
