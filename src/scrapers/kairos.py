@@ -173,52 +173,48 @@ def _no_work_today(page: Page) -> bool:
 
 def _get_order_ids(page: Page, target_date: date) -> List[str]:
     """
-    El dashboard muestra las órdenes del día directamente.
-    Los IDs están en los href con formato /Dashboard/Detalle?codigoOt=XXXX.
-
-    Si target_date no es hoy, navega a /Dashboard/Listado e intenta filtrar.
+    Navega al Dashboard y usa el botón #previous-day-button para llegar
+    a la fecha objetivo. Si es hoy, carga directamente.
     """
     today = date.today()
+    days_back = (today - target_date).days
 
-    if target_date == today:
-        # El dashboard carga las órdenes vía AJAX; esperar al primer enlace de orden
-        try:
-            page.wait_for_selector("a[href*='codigoOt']", state="attached", timeout=15_000)
-        except PWTimeout:
-            pass  # Sin órdenes hoy o página vacía
-        return _extract_order_ids_from_page(page)
-
-    # Para fechas pasadas: ir al listado con filtro de fecha
-    date_str = target_date.strftime("%d/%m/%Y")
-    page.goto(f"{_BASE_URL}/Dashboard/Listado", timeout=_TIMEOUT)
-    # El Listado carga contenido vía AJAX; esperar a que aparezca algún codigoOt
+    # Esperar a que el dashboard cargue
     try:
-        page.wait_for_function(
-            "() => document.body.innerHTML.includes('codigoOt')",
-            timeout=10_000,
-        )
+        page.wait_for_selector("#header_listado", state="visible", timeout=15_000)
+    except PWTimeout:
+        pass
+
+    # Navegar hacia atrás los días necesarios
+    for _ in range(days_back):
+        try:
+            # El botón puede estar hidden; forzar click via JS
+            page.evaluate("document.getElementById('previous-day-button').click()")
+            page.wait_for_timeout(1_500)
+        except Exception as e:
+            logger.warning("Kairos: no se pudo navegar al día anterior: %s", e)
+            break
+
+    # Esperar a que carguen las órdenes
+    try:
+        page.wait_for_selector("a[href*='codigoOt']", state="attached", timeout=15_000)
     except PWTimeout:
         pass  # Sin órdenes o página vacía
 
-    date_filter = page.locator("input[placeholder*='echa'], input[name*='echa'], input[type='date']")
-    if date_filter.count() > 0:
-        date_filter.first.fill(date_str)
-        search = page.locator("button:has-text('Buscar'), button:has-text('Filtrar'), button[type='submit']")
-        if search.count() > 0:
-            search.first.click()
-            try:
-                page.wait_for_function(
-                    "() => document.body.innerHTML.includes('codigoOt')",
-                    timeout=10_000,
-                )
-            except PWTimeout:
-                pass
+    # Verificar la fecha mostrada
+    try:
+        shown = page.locator("#current-day-title").inner_text(timeout=3_000).strip()
+        date_str = target_date.strftime("%d/%m/%Y")
+        if shown and date_str not in shown:
+            logger.warning("Kairos: fecha mostrada '%s' no coincide con objetivo '%s'", shown, date_str)
+    except Exception:
+        pass
 
     ids = _extract_order_ids_from_page(page)
     if not ids:
-        logger.warning("Kairos: no se encontraron órdenes para %s. "
-                       "El dashboard solo muestra el día actual.", date_str)
+        logger.warning("Kairos: no se encontraron órdenes para %s.", target_date.strftime("%d/%m/%Y"))
     return ids
+
 
 
 def _extract_order_ids_from_page(page: Page) -> List[str]:
