@@ -122,9 +122,26 @@ def _login(page: Page, username: str, password: str) -> None:
     page.goto(_BASE_URL, timeout=_TIMEOUT)
     page.wait_for_load_state("networkidle", timeout=_TIMEOUT)
 
-    page.fill("#usuario", username)
-    page.fill("#password", password)
+    # Si ya hay sesión activa, redirige directo al Dashboard
+    if "/Dashboard" in page.url:
+        logger.debug("Orange: sesión ya activa para %s", username)
+        return
+
+    page.locator("#usuario").click()
+    page.locator("#usuario").clear()
+    page.keyboard.type(username)
+    page.locator("#password").click()
+    page.locator("#password").clear()
+    page.keyboard.type(password)
     page.click("#bt_login")
+
+    # Cerrar aviso de cambio de contraseña si aparece
+    try:
+        btn_omitir = page.locator("button:has-text('Omitir'), button:has-text('Saltar'), button:has-text('Cancelar'), button:has-text('No'), a:has-text('Omitir'), a:has-text('Saltar')")
+        btn_omitir.first.click(timeout=5_000)
+        logger.debug("Orange: aviso de contraseña cerrado")
+    except Exception:
+        pass
 
     # Orange es una SPA: detectar login exitoso por cambio de URL al Dashboard
     try:
@@ -174,7 +191,7 @@ def _get_order_ids(page: Page, target_date: date) -> List[str]:
 
     # Esperar a que carguen las órdenes
     try:
-        page.wait_for_selector("a[href*='codigoOt']", state="attached", timeout=15_000)
+        page.wait_for_selector("a[href*='codigoOt']", state="attached", timeout=20_000)
     except PWTimeout:
         pass
 
@@ -196,7 +213,7 @@ def _get_order_ids(page: Page, target_date: date) -> List[str]:
 def _extract_order_ids_from_page(page: Page) -> List[str]:
     """Extrae IDs de orden de los href /Dashboard/Detalle?codigoOt=XXXX, aplicando filtros."""
     html = page.content()
-    ids = re.findall(r'/Dashboard/Detalle\?codigoOt=([^"\'&\s]+)', html)
+    ids = re.findall(r'/(?:Dashboard/Detalle|DetalleOrden)\?codigoOt=([^"\'&\s]+)', html)
     unique = list(dict.fromkeys(ids))
 
     filtered = []
@@ -246,7 +263,13 @@ def _find_boletin_ok_index(page: Page, order_id: str) -> "Tuple[Optional[int], i
     - Si hay documentos pero ninguno es el boletín OK: (None, n>0) → registrar como incidencia
     - Si se encuentra: (indice, n_total)
     """
-    containers = page.locator("[id^='instalacion_']").all()
+    # Buscar por data-orden (nuevo formato Orange) o por id^=instalacion_ (formato antiguo)
+    containers = page.locator("[data-orden]").all()
+    if not containers:
+        containers = page.locator("[id^='instalacion_']").all()
+        use_data_orden = False
+    else:
+        use_data_orden = True
     n_total = len(containers)
 
     if n_total == 0:
@@ -260,8 +283,12 @@ def _find_boletin_ok_index(page: Page, order_id: str) -> "Tuple[Optional[int], i
             continue
         txt = btn.first.inner_text().strip().lower()
         if _BOLETIN_OK in txt:
-            div_id = container.get_attribute("id") or ""
-            m = re.search(r'instalacion_(\d+)', div_id)
+            if use_data_orden:
+                data_orden = container.get_attribute("data-orden") or ""
+                m = re.search(r'_(\d+)$', data_orden)
+            else:
+                div_id = container.get_attribute("id") or ""
+                m = re.search(r'instalacion_(\d+)', div_id)
             if m:
                 boletin_idx = int(m.group(1))
 
@@ -285,7 +312,7 @@ def _download_order_pdf(page: Page, order_id: str, dest_path: Path) -> "Tuple[Op
     """
     logger.info("Orange: descargando PDF de %s", order_id)
     try:
-        page.goto(f"{_BASE_URL}/Dashboard/Detalle?codigoOt={order_id}", timeout=_TIMEOUT)
+        page.goto(f"{_BASE_URL}/DetalleOrden?codigoOt={order_id}", timeout=_TIMEOUT)
         page.wait_for_load_state("networkidle", timeout=_TIMEOUT)
 
         indice, n_total = _find_boletin_ok_index(page, order_id)
@@ -293,7 +320,7 @@ def _download_order_pdf(page: Page, order_id: str, dest_path: Path) -> "Tuple[Op
             is_incidencia = n_total > 0
             return None, is_incidencia
 
-        url = f"{_BASE_URL}/Dashboard/DescargarParte?codigoOt={order_id}&tipo=instalacion&indice={indice}"
+        url = f"{_BASE_URL}/DetalleOrden/DescargarParte?codigoOt={order_id}&tipo=1&indice={indice}"
         response = page.request.get(url)
         if response.status != 200:
             logger.warning("Orange: HTTP %d al descargar %s", response.status, order_id)
