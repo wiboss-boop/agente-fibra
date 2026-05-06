@@ -82,6 +82,8 @@ def _detect_pdf_type(text: str) -> str:
         return "kairos"
     if "BOLET" in normalized and "DIGITAL" in normalized:
         return "orange"
+    if "DATOS ACOMETIDA" in normalized:
+        return "orange"
     return "unknown"
 
 
@@ -121,7 +123,7 @@ def _extract_orden(text: str, pdf_type: str) -> Optional[str]:
     elif pdf_type == "averia":
         raw = _find_field(text, "Código de OT", "Código OT", "Código de instalación")
     else:
-        raw = _find_field(text, "Código", "Cód.", "Referencia")
+        raw = _find_field(text, "Identificador OT", "Código", "Cód.", "Referencia")
     if raw:
         return raw.split()[0]
     return None
@@ -263,9 +265,11 @@ def _codigo_atc(text: str) -> Tuple[Optional[str], bool, bool]:
 def _codigo_orange(text: str) -> Tuple[Optional[str], bool]:
     """
     Devuelve (codigo, incidencia).
-    Solo hay nueva acometida si se especifica longitud en metros; cualquier
-    otro caso se clasifica como MM17 (reutilizada).
+    Posventa OK → AVERIA OK. Sin metros → MM17. Con metros → MM0x.
     """
+    # Boletín Posventa = avería resuelta
+    if re.search(r'bolet[ií]n\s+digital\s+posventa', text, re.IGNORECASE):
+        return "AVERIA OK", False
     meters = _extract_meters(text)
     if meters is not None:
         return _meters_to_code(meters), False
