@@ -252,7 +252,10 @@ def _skip_reason(order_id: str, html: str) -> Optional[str]:
 # Descarga de PDF por orden
 # ---------------------------------------------------------------------------
 
-_BOLETIN_OK = "boletín digital de instalación ok"
+# Detecta cualquier boletín/cierre exitoso: "boletín ... ok" o "cierre ... ok"
+def _is_boletin_ok(txt: str) -> bool:
+    t = txt.lower()
+    return ("ok" in t) and ("boletín" in t or "cierre" in t)
 
 
 def _find_boletin_ok_index(page: Page, order_id: str) -> "Tuple[Optional[int], int]":
@@ -282,7 +285,7 @@ def _find_boletin_ok_index(page: Page, order_id: str) -> "Tuple[Optional[int], i
         if btn.count() == 0:
             continue
         txt = btn.first.inner_text().strip().lower()
-        if _BOLETIN_OK in txt:
+        if _is_boletin_ok(txt):
             if use_data_orden:
                 data_orden = container.get_attribute("data-orden") or ""
                 m = re.search(r'_(\d+)$', data_orden)
@@ -320,19 +323,28 @@ def _download_order_pdf(page: Page, order_id: str, dest_path: Path) -> "Tuple[Op
             is_incidencia = n_total > 0
             return None, is_incidencia
 
-        url = f"{_BASE_URL}/DetalleOrden/DescargarParte?codigoOt={order_id}&tipo=1&indice={indice}"
-        response = page.request.get(url)
-        if response.status != 200:
-            logger.warning("Orange: HTTP %d al descargar %s", response.status, order_id)
+        containers = page.locator("[data-orden]").all()
+        btn_clicked = False
+        for container in containers:
+            data_orden = container.get_attribute("data-orden") or ""
+            if data_orden.endswith(f"_{indice}"):
+                btn = container.locator("button").first
+                try:
+                    with page.expect_download(timeout=30_000) as dl_info:
+                        btn.click()
+                    download = dl_info.value
+                    download.save_as(dest_path)
+                    logger.info("Orange: guardado %s", dest_path.name)
+                    btn_clicked = True
+                except Exception as exc:
+                    logger.error("Orange: error al descargar %s — %s", order_id, exc)
+                    return None, False
+                break
+
+        if not btn_clicked:
+            logger.warning("Orange: no se encontró botón para índice %s en orden %s", indice, order_id)
             return None, False
 
-        content_type = response.headers.get("content-type", "")
-        if "pdf" not in content_type and len(response.body()) < 100:
-            logger.warning("Orange: respuesta inesperada para %s (content-type=%s)", order_id, content_type)
-            return None, False
-
-        dest_path.write_bytes(response.body())
-        logger.info("Orange: guardado %s (%d bytes)", dest_path.name, len(response.body()))
         return dest_path, False
 
     except PWTimeout:
