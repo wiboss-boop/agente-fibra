@@ -128,7 +128,6 @@ def main() -> None:
     pdfs = collect_pdfs(downloads_dir)
     if not pdfs and not orange_incidencias:
         logger.info("No hay PDFs ni incidencias Orange que procesar.")
-        return
 
     logger.info("PDFs a procesar: %d", len(pdfs))
 
