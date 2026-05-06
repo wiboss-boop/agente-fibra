@@ -309,6 +309,14 @@ def parse_pdf(filepath) -> dict:
     orden = _extract_orden(text, pdf_type)
     fecha = _extract_fecha(text)
     tecnico = _extract_tecnico(text)
+    # Fallback: extraer técnico del nombre del archivo (ej. 8603203_HANS.pdf)
+    if not tecnico:
+        import re as _re
+        m = _re.search(r'_([A-Z][A-Z ]+[A-Z])(?:_dup)?\.pdf$', path.name)
+        if m:
+            candidate = m.group(1).strip()
+            if candidate in set(TECHNICIAN_MAP.values()):
+                tecnico = candidate
 
     if pdf_type == "atc":
         codigo, incidencia, skip = _codigo_atc(text)

@@ -82,7 +82,7 @@ def _process_technician(
         logger.info("Orange / %s: %d órdenes encontradas", name, len(order_ids))
 
         for order_id in order_ids:
-            pdf_path = downloads_dir / f"{order_id}.pdf"
+            pdf_path = downloads_dir / f"{order_id}_{name}.pdf"
             if pdf_path.exists():
                 logger.info("Ya existe, omitido: %s", pdf_path.name)
                 continue
