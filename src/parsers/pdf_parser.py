@@ -170,6 +170,11 @@ def _extract_meters(text: str) -> Optional[float]:
     # "m" sola: se acepta solo si NO va seguida de b/B/p/P/s/S (Mb, MB, Mbps) ni de "/"
     pattern = r'(\d+(?:[.,]\d+)?)\s*(?:metros?|mt\b|m(?![bBpPsS/])\b)'
     for match in re.finditer(pattern, text, re.IGNORECASE):
+        # Excluir velocidades: patrón NNN M/NNN M (con o sin espacio)
+        end = match.end()
+        following = text[end:end+5]
+        if re.match(r'\s*/', following):
+            continue
         value = float(match.group(1).replace(',', '.'))
         # Longitudes de acometida plausibles: 1–500 m
         if 1 <= value <= 500:
@@ -265,11 +270,23 @@ def _codigo_atc(text: str) -> Tuple[Optional[str], bool, bool]:
 def _codigo_orange(text: str) -> Tuple[Optional[str], bool]:
     """
     Devuelve (codigo, incidencia).
-    Posventa OK → AVERIA OK. Sin metros → MM17. Con metros → MM0x.
+    - Posventa OK → AVERIA OK
+    - Datos acometida: leer --Reutiliza Acometida y Modelo del componente
+    - Sin info → MM17
     """
     # Boletín Posventa = avería resuelta
     if re.search(r'bolet[ií]n\s+digital\s+posventa', text, re.IGNORECASE):
         return "AVERIA OK", False
+    # PDF de reutilización: usar --Reutiliza Acometida
+    if "datos acometida" in text.lower():
+        if re.search(r'--Reutiliza Acometida:\s*SI', text, re.IGNORECASE):
+            return "MM17", False
+        # Acometida nueva: buscar metros en Modelo del componente
+        m = re.search(r'ACOMETIDA EXTERIOR\s+(\d+)M', text, re.IGNORECASE)
+        if m:
+            meters = float(m.group(1))
+            return _meters_to_code(meters), False
+        return "MM17", False
     meters = _extract_meters(text)
     if meters is not None:
         return _meters_to_code(meters), False

@@ -273,11 +273,7 @@ def _skip_reason(order_id: str, html: str) -> Optional[str]:
 # Detecta cualquier boletín/cierre exitoso: "boletín ... ok" o "cierre ... ok"
 def _is_boletin_ok(txt: str) -> bool:
     t = txt.lower()
-    if ("ok" in t) and ("boletín" in t or "cierre" in t):
-        return True
-    if "reutilización de la acometida" in t:
-        return True
-    return False
+    return "reutilización de la acometida" in t
 
 
 def _find_boletin_ok_index(page: Page, order_id: str) -> "Tuple[Optional[int], int]":
