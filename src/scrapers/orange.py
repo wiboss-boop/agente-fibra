@@ -183,25 +183,43 @@ def _get_order_ids(page: Page, target_date: date) -> List[str]:
     # Navegar hacia atrás los días necesarios
     for _ in range(days_back):
         try:
-            page.evaluate("document.getElementById('previous-day-button').click()")
-            page.wait_for_timeout(1_500)
+            current = page.locator("#current-day-title").inner_text(timeout=5_000).strip()
+            page.locator('#previous-day-button').click()
+            # Esperar a que el título cambie antes de continuar
+            try:
+                page.wait_for_function(
+                    f"document.getElementById('current-day-title')?.innerText?.trim() !== {repr(current)}",
+                    timeout=10_000,
+                )
+            except Exception:
+                page.wait_for_timeout(3_000)
         except Exception as e:
             logger.warning("Orange: no se pudo navegar al día anterior: %s", e)
             break
 
-    # Esperar a que carguen las órdenes
+    # Esperar a que el título muestre la fecha objetivo
+    date_str = target_date.strftime("%d/%m/%Y")
+    try:
+        page.wait_for_function(
+            f"document.getElementById('current-day-title')?.innerText?.includes('{date_str}')",
+            timeout=15_000,
+        )
+        logger.debug("Orange: fecha confirmada en dashboard: %s", date_str)
+    except Exception:
+        shown = ""
+        try:
+            shown = page.locator("#current-day-title").inner_text(timeout=3_000).strip()
+        except Exception:
+            pass
+        logger.warning("Orange: fecha mostrada '%s' no coincide con objetivo '%s'", shown, date_str)
+
+    # Esperar a que carguen las órdenes del día objetivo
+    # Orange actualiza el título antes que el contenido, hay que esperar
+    if days_back > 0:
+        page.wait_for_timeout(3_000)
     try:
         page.wait_for_selector("a[href*='codigoOt']", state="attached", timeout=20_000)
     except PWTimeout:
-        pass
-
-    # Verificar la fecha mostrada
-    try:
-        shown = page.locator("#current-day-title").inner_text(timeout=3_000).strip()
-        date_str = target_date.strftime("%d/%m/%Y")
-        if shown and date_str not in shown:
-            logger.warning("Orange: fecha mostrada '%s' no coincide con objetivo '%s'", shown, date_str)
-    except Exception:
         pass
 
     ids = _extract_order_ids_from_page(page)
@@ -255,7 +273,11 @@ def _skip_reason(order_id: str, html: str) -> Optional[str]:
 # Detecta cualquier boletín/cierre exitoso: "boletín ... ok" o "cierre ... ok"
 def _is_boletin_ok(txt: str) -> bool:
     t = txt.lower()
-    return ("ok" in t) and ("boletín" in t or "cierre" in t)
+    if ("ok" in t) and ("boletín" in t or "cierre" in t):
+        return True
+    if "reutilización de la acometida" in t:
+        return True
+    return False
 
 
 def _find_boletin_ok_index(page: Page, order_id: str) -> "Tuple[Optional[int], int]":
