@@ -273,7 +273,12 @@ def _skip_reason(order_id: str, html: str) -> Optional[str]:
 # Detecta cualquier boletín/cierre exitoso: "boletín ... ok" o "cierre ... ok"
 def _is_boletin_ok(txt: str) -> bool:
     t = txt.lower()
-    return "reutilización de la acometida" in t
+    if "reutilización de la acometida" in t:
+        return True
+    # Posventa OK = avería resuelta (no tiene PDF de reutilización)
+    if ("boletín digital posventa" in t) or ("cierre de incidencia ok" in t) or ("cierre ok" in t):
+        return True
+    return False
 
 
 def _find_boletin_ok_index(page: Page, order_id: str) -> "Tuple[Optional[int], int]":
@@ -348,6 +353,16 @@ def _download_order_pdf(page: Page, order_id: str, dest_path: Path) -> "Tuple[Op
             if data_orden.endswith(f"_{indice}"):
                 btn = container.locator("button").first
                 try:
+                    # Cerrar alertify-cover si está bloqueando
+                    try:
+                        page.evaluate("""
+                            var cover = document.querySelector('.alertify-cover');
+                            if (cover) cover.style.display = 'none';
+                            var log = document.querySelector('.alertify-logs');
+                            if (log) log.style.display = 'none';
+                        """)
+                    except Exception:
+                        pass
                     with page.expect_download(timeout=30_000) as dl_info:
                         btn.click()
                     download = dl_info.value
