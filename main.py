@@ -14,6 +14,7 @@ import logging
 import shutil
 import sys
 from datetime import date, datetime
+from zoneinfo import ZoneInfo
 from pathlib import Path
 from typing import List
 
@@ -84,7 +85,7 @@ def main() -> None:
     if args.fecha:
         target_date = datetime.strptime(args.fecha, "%d/%m/%Y").date()
     else:
-        target_date = date.today()
+        target_date = datetime.now(ZoneInfo("America/Bogota")).date()
 
     config = load_config()
     downloads_dir = Path(config.get("downloads_dir", "downloads"))

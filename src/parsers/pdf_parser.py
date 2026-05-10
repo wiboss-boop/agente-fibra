@@ -109,7 +109,7 @@ def _find_field(text: str, *labels: str) -> Optional[str]:
         pattern2 = rf'{re.escape(label)}\s*:?\s*\n\s*[•\-]\s*([^\n]+)'
         match2 = re.search(pattern2, text, re.IGNORECASE)
         if match2:
-            value = match2.group(1).strip().lstrip('•\-– ').strip()
+            value = match2.group(1).strip().lstrip('•\\-– ').strip()
             if value:
                 return value
     return None
@@ -211,7 +211,7 @@ def _codigo_kairos(text: str) -> Tuple[Optional[str], bool]:
             meters = _extract_meters(longitud_raw)
             if meters is None:
                 import re as _re
-                longitud_clean = longitud_raw.strip().lstrip("•\-– ").strip()
+                longitud_clean = longitud_raw.strip().lstrip("•\\-– ").strip()
                 m = _re.match(r"(\d+(?:[.,]\d+)?)", longitud_clean)
                 if m:
                     meters = float(m.group(1).replace(",", "."))
