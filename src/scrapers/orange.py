@@ -46,6 +46,10 @@ def run(
     technicians = load_technicians()
     logger.info("Orange: %d técnicos para %s", len(technicians), target_date.strftime("%d/%m/%Y"))
 
+    if not technicians:
+        logger.info("Orange: ningún técnico configurado, omitiendo")
+        return [], []
+
     all_downloaded: List[Path] = []
     all_incidencias: List[dict] = []
     with sync_playwright() as pw:
@@ -346,33 +350,50 @@ def _download_order_pdf(page: Page, order_id: str, dest_path: Path) -> "Tuple[Op
             is_incidencia = n_total > 0
             return None, is_incidencia
 
-        containers = page.locator("[data-orden]").all()
+        # Buscar el contenedor del índice correcto — soporta formato nuevo ([data-orden])
+        # y formato antiguo ([id^='instalacion_'])
         btn_clicked = False
-        for container in containers:
-            data_orden = container.get_attribute("data-orden") or ""
-            if data_orden.endswith(f"_{indice}"):
-                btn = container.locator("button").first
-                try:
-                    # Cerrar alertify-cover si está bloqueando
-                    try:
-                        page.evaluate("""
-                            var cover = document.querySelector('.alertify-cover');
-                            if (cover) cover.style.display = 'none';
-                            var log = document.querySelector('.alertify-logs');
-                            if (log) log.style.display = 'none';
-                        """)
-                    except Exception:
-                        pass
-                    with page.expect_download(timeout=30_000) as dl_info:
-                        btn.click()
-                    download = dl_info.value
-                    download.save_as(dest_path)
-                    logger.info("Orange: guardado %s", dest_path.name)
-                    btn_clicked = True
-                except Exception as exc:
-                    logger.error("Orange: error al descargar %s — %s", order_id, exc)
-                    return None, False
-                break
+        btn = None
+
+        new_containers = page.locator("[data-orden]").all()
+        if new_containers:
+            for container in new_containers:
+                data_orden = container.get_attribute("data-orden") or ""
+                if data_orden.endswith(f"_{indice}"):
+                    btn = container.locator("button").first
+                    break
+        else:
+            old_containers = page.locator("[id^='instalacion_']").all()
+            for container in old_containers:
+                div_id = container.get_attribute("id") or ""
+                if div_id == f"instalacion_{indice}":
+                    btn = container.locator("button").first
+                    break
+
+        if btn is None:
+            logger.warning("Orange: no se encontró botón para índice %s en orden %s", indice, order_id)
+            return None, False
+
+        try:
+            # Cerrar alertify-cover si está bloqueando
+            try:
+                page.evaluate("""
+                    var cover = document.querySelector('.alertify-cover');
+                    if (cover) cover.style.display = 'none';
+                    var log = document.querySelector('.alertify-logs');
+                    if (log) log.style.display = 'none';
+                """)
+            except Exception:
+                pass
+            with page.expect_download(timeout=30_000) as dl_info:
+                btn.click()
+            download = dl_info.value
+            download.save_as(dest_path)
+            logger.info("Orange: guardado %s", dest_path.name)
+            btn_clicked = True
+        except Exception as exc:
+            logger.error("Orange: error al descargar %s — %s", order_id, exc)
+            return None, False
 
         if not btn_clicked:
             logger.warning("Orange: no se encontró botón para índice %s en orden %s", indice, order_id)

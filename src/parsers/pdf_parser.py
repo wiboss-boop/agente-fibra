@@ -210,9 +210,8 @@ def _codigo_kairos(text: str) -> Tuple[Optional[str], bool]:
         if longitud_raw:
             meters = _extract_meters(longitud_raw)
             if meters is None:
-                import re as _re
                 longitud_clean = longitud_raw.strip().lstrip("•\\-– ").strip()
-                m = _re.match(r"(\d+(?:[.,]\d+)?)", longitud_clean)
+                m = re.match(r"(\d+(?:[.,]\d+)?)", longitud_clean)
                 if m:
                     meters = float(m.group(1).replace(",", "."))
         # Sin longitud especificada: asumir MM01 (<=20m)
@@ -332,8 +331,7 @@ def parse_pdf(filepath) -> dict:
     tecnico = _extract_tecnico(text)
     # Fallback: extraer técnico del nombre del archivo (ej. 8603203_HANS.pdf)
     if not tecnico:
-        import re as _re
-        m = _re.search(r'_([A-Z][A-Z ]+[A-Z])(?:_dup)?\.pdf$', path.name)
+        m = re.search(r'_([A-Z][A-Z ]+[A-Z])(?:_dup)?\.pdf$', path.name)
         if m:
             candidate = m.group(1).strip()
             if candidate in set(TECHNICIAN_MAP.values()):

@@ -72,16 +72,6 @@ def _read_column(
     return [r[0] if r else "" for r in rows]
 
 
-def _first_empty_row(existing_values: List[str]) -> int:
-    """
-    Devuelve el índice (1-based) de la primera fila vacía en la columna,
-    empezando desde FIRST_DATA_ROW.
-    """
-    for i, val in enumerate(existing_values):
-        if not val.strip():
-            return FIRST_DATA_ROW + i
-    return FIRST_DATA_ROW + len(existing_values)
-
 
 def _write_range(
     service,

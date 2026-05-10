@@ -175,7 +175,7 @@ def main() -> None:
         logger.info("Sin altas hoy: %s", tecnico)
 
     # -----------------------------------------------------------------------
-    # 4. Escribir en Google Sheets
+    # 5. Escribir en Google Sheets
     # -----------------------------------------------------------------------
     counters = {"escritos": 0, "duplicados": 0, "omitidos": 0}
     if records:
@@ -185,7 +185,7 @@ def main() -> None:
             logger.error("Error al escribir en Google Sheets: %s", exc)
 
     # -----------------------------------------------------------------------
-    # 5. Mover PDFs procesados
+    # 6. Mover PDFs procesados
     # -----------------------------------------------------------------------
     moved = 0
     for pdf in pdfs:
@@ -195,7 +195,7 @@ def main() -> None:
             logger.info("Movido a procesados/: %s", pdf.name)
 
     # -----------------------------------------------------------------------
-    # 6. Resumen
+    # 7. Resumen
     # -----------------------------------------------------------------------
     n_incidencias = sum(1 for r in records if r.get("incidencia"))
     n_sin_tecnico = sum(1 for r in records if not r.get("tecnico"))
