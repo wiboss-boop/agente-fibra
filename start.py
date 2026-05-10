@@ -7,4 +7,4 @@ if credentials_yaml:
     with open("config/credentials.yaml", "w") as f:
         f.write(credentials_yaml)
 
-os.execlp("python", "python", "scheduler.py")
+os.execlp("python", "python", "main.py")
