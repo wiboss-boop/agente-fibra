@@ -161,10 +161,9 @@ def main() -> None:
     # -----------------------------------------------------------------------
     # 4. Añadir SIN ALTAS para técnicos sin registros
     # -----------------------------------------------------------------------
-    from src.parsers.pdf_parser import TECHNICIAN_MAP
     tecnicos_con_altas = {r.get("tecnico") for r in records if r.get("tecnico")}
-    todos_tecnicos = set(TECHNICIAN_MAP.values())
-    for tecnico in todos_tecnicos - tecnicos_con_altas:
+    todos_tecnicos = {t["name"] for t in config.get("technicians", [])}
+    for tecnico in sorted(todos_tecnicos - tecnicos_con_altas):
         records.append({
             "orden": "-",
             "fecha": target_date.strftime("%d/%m/%Y"),

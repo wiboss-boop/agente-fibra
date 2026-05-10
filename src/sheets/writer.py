@@ -124,8 +124,8 @@ def write_results(records: List[Dict[str, Any]]) -> Dict[str, int]:
 
     counters = {"escritos": 0, "duplicados": 0, "omitidos": 0}
 
-    # Caché de órdenes ya existentes por hoja para evitar lecturas repetidas
-    existing_orders_cache: Dict[str, set] = {}
+    # Caché por hoja: set de (fecha, orden) ya existentes + siguiente fila libre
+    cache: Dict[str, Dict] = {}
 
     for rec in records:
         tecnico = rec.get("tecnico")
@@ -146,23 +146,26 @@ def write_results(records: List[Dict[str, Any]]) -> Dict[str, int]:
             counters["omitidos"] += 1
             continue
 
-        # Cargar órdenes existentes en caché (una sola lectura por hoja)
-        if tecnico not in existing_orders_cache:
-            existing_orders_cache[tecnico] = set(
-                _read_column(service, spreadsheet_id, tecnico, COL_ORDEN)
-            )
+        # Cargar caché de la hoja (una sola lectura por hoja)
+        if tecnico not in cache:
+            fechas  = _read_column(service, spreadsheet_id, tecnico, COL_FECHA)
+            ordenes = _read_column(service, spreadsheet_id, tecnico, COL_ORDEN)
+            n = max(len(fechas), len(ordenes))
+            fechas  += [""] * (n - len(fechas))
+            ordenes += [""] * (n - len(ordenes))
+            cache[tecnico] = {
+                "keys": set(zip(fechas, ordenes)),   # (fecha, orden) únicos
+                "next_row": FIRST_DATA_ROW + n,
+            }
 
-        # Verificar duplicado
-        if orden and orden in existing_orders_cache[tecnico]:
-            logger.info("Duplicado omitido: orden=%s en hoja '%s'", orden, tecnico)
+        # Verificar duplicado por (fecha, orden) — evita bloquear "-" entre días
+        cache_key = (fecha, orden)
+        if orden and cache_key in cache[tecnico]["keys"]:
+            logger.info("Duplicado omitido: orden=%s fecha=%s en hoja '%s'", orden, fecha, tecnico)
             counters["duplicados"] += 1
             continue
 
-        # Encontrar la primera fila disponible
-        orden_col_values = list(existing_orders_cache[tecnico])
-        # Releer la columna para obtener la lista ordenada (el set no preserva posición)
-        col_values = _read_column(service, spreadsheet_id, tecnico, COL_ORDEN)
-        target_row = _first_empty_row(col_values)
+        target_row = cache[tecnico]["next_row"]
 
         if incidencia:
             _write_incidencia(service, spreadsheet_id, tecnico, target_row, fecha, orden)
@@ -170,8 +173,8 @@ def write_results(records: List[Dict[str, Any]]) -> Dict[str, int]:
             _write_normal(service, spreadsheet_id, tecnico, target_row, fecha, orden, codigo)
 
         # Actualizar caché
-        if orden:
-            existing_orders_cache[tecnico].add(orden)
+        cache[tecnico]["keys"].add(cache_key)
+        cache[tecnico]["next_row"] += 1
 
         logger.info(
             "Escrito en '%s' fila %d: orden=%s codigo=%s incidencia=%s",
