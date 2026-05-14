@@ -8,8 +8,11 @@ if credentials_yaml:
         f.write(credentials_yaml)
 
 args = ["main.py"]
-fecha = os.getenv("AGENTE_FECHA")
-if fecha:
-    args += ["--fecha", fecha]
+if os.getenv("AGENTE_FECHA"):
+    args += ["--fecha", os.getenv("AGENTE_FECHA")]
+if os.getenv("AGENTE_NO_SCRAPE"):
+    args += ["--no-scrape"]
+if os.getenv("AGENTE_VISIBLE"):
+    args += ["--visible"]
 
 os.execlp("python", "python", *args)

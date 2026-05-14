@@ -103,6 +103,7 @@ def main() -> None:
     # -----------------------------------------------------------------------
     orange_incidencias: List[dict] = []
     kairos_sin_parte: List[dict] = []
+    scraper_errors: List[str] = []
 
     if not args.no_scrape:
         from src.scrapers import kairos, orange
@@ -112,6 +113,7 @@ def main() -> None:
             _, kairos_sin_parte = kairos.run(target_date=target_date, downloads_dir=downloads_dir, headless=headless)
         except Exception as exc:
             logger.error("Scraper Kairos falló: %s", exc, exc_info=True)
+            scraper_errors.append(f"Kairos: {exc}")
 
         logger.info("Iniciando scraper Orange…")
         try:
@@ -120,6 +122,7 @@ def main() -> None:
             )
         except Exception as exc:
             logger.error("Scraper Orange falló: %s", exc, exc_info=True)
+            scraper_errors.append(f"Orange: {exc}")
     else:
         logger.info("Modo --no-scrape: omitiendo descarga automática")
 
@@ -209,8 +212,14 @@ def main() -> None:
     print(f"  Incidencias      : {n_incidencias}")
     print(f"  Sin técnico      : {n_sin_tecnico}")
     print(f"  Errores parseo   : {len(parse_errors)}")
+    print(f"  Errores scraper  : {len(scraper_errors)}")
     print(f"  Movidos a proc.  : {moved}")
     print("=" * 50)
+
+    if scraper_errors:
+        print("\nErrores en scrapers:")
+        for err in scraper_errors:
+            print(f"  · {err}")
 
     if parse_errors:
         print("\nPDFs con error de parseo (no movidos):")

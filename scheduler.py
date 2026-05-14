@@ -16,42 +16,61 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-def enviar_telegram(mensaje):
+def enviar_telegram(mensaje: str) -> None:
+    import json
     import urllib.request
     token = os.getenv("TELEGRAM_TOKEN")
-    chat_id = "7610971004"
+    chat_id = os.getenv("TELEGRAM_CHAT_ID", "7610971004")
     if not token:
         logger.warning("TELEGRAM_TOKEN no configurado, no se puede enviar informe")
         return
     url = f"https://api.telegram.org/bot{token}/sendMessage"
     data = {"chat_id": chat_id, "text": mensaje, "parse_mode": "HTML"}
-    import json
     req = urllib.request.Request(url, json.dumps(data).encode(), {"Content-Type": "application/json"})
-    urllib.request.urlopen(req, timeout=10)
+    try:
+        urllib.request.urlopen(req, timeout=10)
+    except Exception as exc:
+        logger.warning("No se pudo enviar mensaje Telegram: %s", exc)
 
-def run_agente():
-    logger.info("Iniciando agente-fibra...")
+
+def run_agente() -> None:
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    fecha_hoy = datetime.now(ZoneInfo("America/Bogota")).strftime("%d/%m/%Y")
+
+    logger.info("Iniciando agente-fibra para %s...", fecha_hoy)
     try:
         result = subprocess.run(
             ["python", "main.py"],
             capture_output=True,
             text=True,
-            timeout=3600
+            timeout=3600,
         )
         logger.info("Agente terminado:\n%s", result.stdout)
         if result.stderr:
-            logger.error("Errores:\n%s", result.stderr)
-        # Extraer resumen del output
+            logger.error("Stderr:\n%s", result.stderr)
+
         output = result.stdout
-        lineas = [l for l in output.split("\n") if any(k in l for k in ["RESUMEN", "PDFs", "Escritos", "Duplicados", "Incidencias", "Errores", "==="])]
+        tiene_errores = (
+            "Errores scraper  : " in output and
+            not "Errores scraper  : 0" in output
+        ) or result.returncode != 0
+
+        keywords = ["RESUMEN", "PDFs", "Escritos", "Duplicados", "Incidencias",
+                    "Errores", "===", "Kairos:", "Orange:"]
+        lineas = [l for l in output.split("\n") if any(k in l for k in keywords)]
         resumen = "\n".join(lineas).strip() or output[-500:].strip()
-        enviar_telegram(f"<b>Agente Fibra</b> — informe\n\n<pre>{resumen}</pre>")
+
+        icono = "⚠️" if tiene_errores else "✅"
+        enviar_telegram(
+            f"{icono} <b>Agente Fibra</b> — {fecha_hoy}\n\n<pre>{resumen}</pre>"
+        )
     except subprocess.TimeoutExpired:
         logger.error("Agente timeout después de 1 hora")
-        enviar_telegram("⚠️ Agente fibra: timeout después de 1 hora")
-    except Exception as e:
-        logger.error("Error: %s", e)
-        enviar_telegram(f"❌ Agente fibra error: {e}")
+        enviar_telegram(f"⚠️ <b>Agente Fibra</b> — {fecha_hoy}\n\nTimeout después de 1 hora")
+    except Exception as exc:
+        logger.error("Error inesperado: %s", exc)
+        enviar_telegram(f"❌ <b>Agente Fibra</b> — {fecha_hoy}\n\nError: {exc}")
 
 # 21:00 UTC = 18:00 Bogotá
 schedule.every().day.at("21:00").do(run_agente)

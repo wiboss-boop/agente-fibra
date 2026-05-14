@@ -8,11 +8,29 @@ Estructura esperada por hoja (una por técnico):
 """
 
 import logging
+import time
 import yaml
 from pathlib import Path
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Callable, TypeVar
 
+from googleapiclient.errors import HttpError
 from src.sheets.auth import get_sheets_service
+
+T = TypeVar("T")
+
+
+def _with_retry(fn: Callable[[], T], max_retries: int = 4, base_delay: float = 2.0) -> T:
+    for attempt in range(max_retries):
+        try:
+            return fn()
+        except HttpError as exc:
+            if exc.resp.status in (429, 500, 503) and attempt < max_retries - 1:
+                delay = base_delay * (2 ** attempt)
+                logger.warning("Sheets API %d — reintentando en %.0fs (intento %d/%d)",
+                               exc.resp.status, delay, attempt + 1, max_retries)
+                time.sleep(delay)
+            else:
+                raise
 
 logger = logging.getLogger(__name__)
 
@@ -48,7 +66,7 @@ def _load_spreadsheet_id(config_path: Path = _CONFIG_PATH) -> str:
 
 def _get_sheet_names(service, spreadsheet_id: str) -> List[str]:
     """Devuelve los nombres de todas las hojas del spreadsheet."""
-    meta = service.spreadsheets().get(spreadsheetId=spreadsheet_id).execute()
+    meta = _with_retry(lambda: service.spreadsheets().get(spreadsheetId=spreadsheet_id).execute())
     return [s["properties"]["title"] for s in meta["sheets"]]
 
 
@@ -61,16 +79,13 @@ def _read_column(
 ) -> List[str]:
     """Lee una columna completa desde from_row hasta el final de los datos."""
     range_ = f"'{sheet_name}'!{col}{from_row}:{col}"
-    result = (
-        service.spreadsheets()
-        .values()
-        .get(spreadsheetId=spreadsheet_id, range=range_)
-        .execute()
+    result = _with_retry(
+        lambda: service.spreadsheets().values().get(
+            spreadsheetId=spreadsheet_id, range=range_
+        ).execute()
     )
     rows = result.get("values", [])
-    # Cada elemento es una lista de un valor; aplanamos
     return [r[0] if r else "" for r in rows]
-
 
 
 def _write_range(
@@ -81,12 +96,14 @@ def _write_range(
 ) -> None:
     """Escribe values en range_ usando valueInputOption=USER_ENTERED."""
     body = {"values": values}
-    service.spreadsheets().values().update(
-        spreadsheetId=spreadsheet_id,
-        range=range_,
-        valueInputOption="USER_ENTERED",
-        body=body,
-    ).execute()
+    _with_retry(
+        lambda: service.spreadsheets().values().update(
+            spreadsheetId=spreadsheet_id,
+            range=range_,
+            valueInputOption="USER_ENTERED",
+            body=body,
+        ).execute()
+    )
 
 
 # ---------------------------------------------------------------------------

@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 
 _CONFIG_PATH = Path("config/credentials.yaml")
 _BASE_URL = "https://instaladores.kairos365.com"
-_TIMEOUT = 20_000
+_TIMEOUT = 30_000
 
 
 def load_technicians(config_path: Path = _CONFIG_PATH) -> List[dict]:

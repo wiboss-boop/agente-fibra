@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 
 _CONFIG_PATH = Path("config/credentials.yaml")
 _BASE_URL = "https://polar-tecnicos.orange.es"
-_TIMEOUT = 20_000
+_TIMEOUT = 30_000
 
 
 def load_technicians(config_path: Path = _CONFIG_PATH) -> List[dict]:
@@ -390,13 +390,8 @@ def _download_order_pdf(page: Page, order_id: str, dest_path: Path) -> "Tuple[Op
             download = dl_info.value
             download.save_as(dest_path)
             logger.info("Orange: guardado %s", dest_path.name)
-            btn_clicked = True
         except Exception as exc:
             logger.error("Orange: error al descargar %s — %s", order_id, exc)
-            return None, False
-
-        if not btn_clicked:
-            logger.warning("Orange: no se encontró botón para índice %s en orden %s", indice, order_id)
             return None, False
 
         return dest_path, False
