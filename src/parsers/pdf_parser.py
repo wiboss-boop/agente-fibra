@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 TECHNICIAN_MAP: dict[str, str] = {
-    "Z2168": "DIEGO",
+    "Z2826": "AYMAN",
     "Z2220": "ERCS",
     "Z2174": "CRISTIAN",
     "Z2252": "MARTIN",
