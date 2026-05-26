@@ -30,6 +30,7 @@ TECHNICIAN_MAP: dict[str, str] = {
     "Z2169": "YOHAN",
     "Z2604": "HANS",
     "Z2494": "LUIS E",
+    "Z2832": "JAMES",
 }
 
 # ---------------------------------------------------------------------------
@@ -68,7 +69,7 @@ def _extract_text(filepath: Path) -> str:
 # ---------------------------------------------------------------------------
 
 def _detect_pdf_type(text: str) -> str:
-    """Devuelve 'atc', 'kairos', 'orange', 'averia' o 'unknown'."""
+    """Devuelve 'atc', 'kairos', 'orange', 'averia', 'jazztel' o 'unknown'."""
     # ATC: campo "Código de Petición" (formato nuevo) O título "CIERRE DE INCIDENCIA" (cualquier variante)
     if re.search(r'c[oó]digo\s+de\s+petici[oó]n', text, re.IGNORECASE):
         return "atc"
@@ -84,6 +85,9 @@ def _detect_pdf_type(text: str) -> str:
         return "orange"
     if "DATOS ACOMETIDA" in normalized:
         return "orange"
+    # Jazztel/Kairos incidencia: campo "ID Incidencia" + "Alias del instalador"
+    if re.search(r'ID\s+Incidencia', text, re.IGNORECASE):
+        return "jazztel"
     return "unknown"
 
 
@@ -122,6 +126,8 @@ def _extract_orden(text: str, pdf_type: str) -> Optional[str]:
         raw = _find_field(text, "Código de Petición", "Código de petición", "Código de OT", "Código OT")
     elif pdf_type == "averia":
         raw = _find_field(text, "Código de OT", "Código OT", "Código de instalación")
+    elif pdf_type == "jazztel":
+        raw = _find_field(text, "ID Incidencia")
     else:
         raw = _find_field(text, "Identificador OT", "Código", "Cód.", "Referencia")
     if raw:
@@ -144,7 +150,7 @@ def _extract_fecha(text: str) -> Optional[str]:
 
 def _extract_tecnico(text: str) -> Optional[str]:
     # Primero intentar con el campo explícito "Código de técnico:" para mayor precisión
-    field = _find_field(text, "Código de técnico", "Técnico")
+    field = _find_field(text, "Código de técnico", "Técnico", "Alias del instalador")
     if field:
         token = field.split()[0]
         if token in TECHNICIAN_MAP:
@@ -266,6 +272,17 @@ def _codigo_atc(text: str) -> Tuple[Optional[str], bool, bool]:
     return "AVERIA OK", False, False
 
 
+def _codigo_jazztel(text: str) -> Tuple[Optional[str], bool]:
+    """
+    Devuelve (codigo, incidencia) para PDFs Jazztel (campo 'ID Incidencia').
+    Resolución: Comentarios = 'ok' → AVERIA OK.
+    """
+    comentarios = _find_field(text, "Comentarios")
+    if comentarios and comentarios.strip().lower() == "ok":
+        return "AVERIA OK", False
+    return None, True
+
+
 def _codigo_orange(text: str) -> Tuple[Optional[str], bool]:
     """
     Devuelve (codigo, incidencia).
@@ -349,6 +366,8 @@ def parse_pdf(filepath) -> dict:
         codigo, incidencia = _codigo_orange(text)
     elif pdf_type == "averia":
         codigo, incidencia = _codigo_averia(text)
+    elif pdf_type == "jazztel":
+        codigo, incidencia = _codigo_jazztel(text)
     else:
         logger.warning("Tipo de PDF desconocido en %s", path.name)
         codigo, incidencia = None, True
