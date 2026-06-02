@@ -280,7 +280,7 @@ def _is_boletin_ok(txt: str) -> bool:
     if "reutilización de la acometida" in t:
         return True
     # Posventa OK = avería resuelta (no tiene PDF de reutilización)
-    if ("boletín digital posventa" in t) or ("cierre de incidencia ok" in t) or ("cierre ok" in t):
+    if ("boletín digital posventa" in t) or ("cierre de incidencia ok" in t) or ("cierre ok" in t) or ("boletín digital avería ok" in t) or ("boletin digital averia ok" in t):
         return True
     return False
 
