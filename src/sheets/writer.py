@@ -8,6 +8,7 @@ Estructura esperada por hoja (una por técnico):
 """
 
 import logging
+import os
 import time
 import yaml
 from pathlib import Path
@@ -49,6 +50,9 @@ FIRST_DATA_ROW = 3  # las filas 1 y 2 son cabecera
 # ---------------------------------------------------------------------------
 
 def _load_spreadsheet_id(config_path: Path = _CONFIG_PATH) -> str:
+    env_sid = os.environ.get("ACTIVE_SHEET_ID", "").strip()
+    if env_sid:
+        return env_sid
     with open(config_path) as f:
         cfg = yaml.safe_load(f)
     sid = cfg.get("google_sheets", {}).get("spreadsheet_id", "")
