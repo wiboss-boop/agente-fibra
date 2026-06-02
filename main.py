@@ -232,6 +232,46 @@ def main() -> None:
         for r in incidencias:
             print(f"  · {r['_source']}  orden={r.get('orden')}  técnico={r.get('tecnico')}")
 
+    # -----------------------------------------------------------------------
+    # 8. Notificación Telegram
+    # -----------------------------------------------------------------------
+    _send_telegram_summary(target_date, len(pdfs), counters, n_incidencias,
+                           len(parse_errors), len(scraper_errors), moved)
+
+
+def _send_telegram_summary(target_date, n_pdfs, counters, n_incidencias,
+                            n_parse_errors, n_scraper_errors, moved):
+    import urllib.request
+    import json
+    token = os.environ.get("TELEGRAM_TOKEN", "")
+    chat_id = os.environ.get("TELEGRAM_CHAT_ID", "7610971004")
+    if not token:
+        logger.warning("TELEGRAM_TOKEN no configurado — resumen no enviado")
+        return
+    lines = [
+        f"✅ *Agente fibra — {target_date.strftime('%d/%m/%Y')}*",
+        f"PDFs procesados: {n_pdfs}",
+        f"Escritos en Sheet: {counters['escritos']}",
+        f"Duplicados: {counters['duplicados']}",
+        f"Incidencias: {n_incidencias}",
+        f"Errores parseo: {n_parse_errors}",
+        f"Errores scraper: {n_scraper_errors}",
+        f"Movidos a procesados: {moved}",
+    ]
+    if n_parse_errors > 0:
+        lines.append("⚠️ Hay PDFs con error de parseo")
+    if n_scraper_errors > 0:
+        lines.append("⚠️ Hay errores en scrapers")
+    text = "\n".join(lines)
+    url = f"https://api.telegram.org/bot{token}/sendMessage"
+    data = json.dumps({"chat_id": chat_id, "text": text, "parse_mode": "Markdown"}).encode()
+    try:
+        req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"})
+        urllib.request.urlopen(req, timeout=10)
+        logger.info("Resumen enviado por Telegram")
+    except Exception as exc:
+        logger.error("Error enviando Telegram: %s", exc)
+
 
 if __name__ == "__main__":
     main()
