@@ -22,6 +22,8 @@ from typing import List
 import yaml
 
 from src.parsers.pdf_parser import parse_pdf
+
+logger = logging.getLogger("main")
 from src.sheets.writer import write_results
 
 
@@ -79,7 +81,6 @@ def move_to_processed(pdf: Path, processed_dir: Path) -> None:
 
 def main() -> None:
     setup_logging()
-    logger = logging.getLogger("main")
     args = parse_args()
 
     # Fecha objetivo
