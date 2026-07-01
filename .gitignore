@@ -1,6 +1,9 @@
 config/credentials.yaml
 config/google_oauth_credentials.json
 config/token.json
+config/token_drive.json
+config/token.json.revoked.bak
+config/service_account.json
 downloads/
 logs/
 venv/
