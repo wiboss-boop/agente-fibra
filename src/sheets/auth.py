@@ -59,12 +59,18 @@ def _build_from_oauth(credentials_file: Path, token_file: Path):
     from google.auth.transport.requests import Request
     from google_auth_oauthlib.flow import InstalledAppFlow
 
+    from google.auth.exceptions import RefreshError
+
     creds = _load_token(token_file)
 
     if creds and creds.expired and creds.refresh_token:
         logger.info("Token expirado, renovando automáticamente…")
-        creds.refresh(Request())
-        _save_token(creds, token_file)
+        try:
+            creds.refresh(Request())
+            _save_token(creds, token_file)
+        except RefreshError:
+            logger.warning("Token revocado/expirado sin renovación posible — reautenticando…")
+            creds = None
 
     if not creds or not creds.valid:
         creds = _run_oauth_flow(credentials_file)
