@@ -1,12 +1,18 @@
 #!/usr/bin/env python3
-"""Genera ALTAS_JUNIO_2026.xlsx desde el Sheet 'JUNIO' del agente.
+"""Genera ALTAS_<MES>_<AÑO>.xlsx desde el Sheet mensual del agente.
 
 Reglas acordadas con el usuario:
-- Todo es junio 2026. El DÍA de la fecha es correcto; mes/año se fuerzan a 06/2026.
+- Todo es del mes en curso. El DÍA de la fecha es correcto; mes/año se fuerzan.
 - Precio al técnico: se toma de la columna TECNICO; si está vacío se rellena por código.
 - Se excluyen filas que no son órdenes (SIN ALTAS, pies de nómina, festivos, etc.).
+- NO se puede pagar una orden dos veces:
+    · Mismo orden + mismo día en un técnico → duplicado técnico (el agente re-apila su
+      volcado diario debajo del bloque ya cerrado). Se colapsa a una sola fila,
+      prefiriendo la que trae precio del contador.
+    · Mismo orden en días distintos (mismo técnico) o en dos técnicos → AMBIGUO: no se
+      resuelve solo; se deja en el archivo y se REPORTA para decisión manual.
 - Formato de salida = igual que ALTAS_MAYO_2026.xlsx: una hoja por técnico,
-  fila 1 título 'NOMBRE — JUNIO 2026', fila 2 cabecera FECHA|ORDEN|CODIGO|TECNICO.
+  fila 1 título 'NOMBRE — <MES> <AÑO>', fila 2 cabecera FECHA|ORDEN|CODIGO|TECNICO.
 """
 import re
 import sys
@@ -15,9 +21,13 @@ from collections import defaultdict
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill
 
+from src.reconciliation.extract import norm_order
 from src.sheets.auth import get_sheets_service
 
 SID = "1JjUY08AJmICiPmc9xXDJEdqKFIv2rIln6AYYWUxzMwI"
+MES = "JUNIO"
+MES_NUM = 6
+ANIO = 2026
 TECS = ["CRISTIAN", "MARTIN", "JAMES", "JEAN", "YOHAN", "ERCS",
         "HANS", "JOEL", "DIANA", "AYMAN", "LUIS E"]
 OUT = ("/Users/samaro/Library/CloudStorage/GoogleDrive-salamanca118@gmail.com/"
@@ -55,81 +65,136 @@ def money(value):
         return None
 
 
-def main() -> None:
-    write = "--write" in sys.argv
-    service = get_sheets_service()
-
-    workbook = Workbook()
-    workbook.remove(workbook.active)
-
-    title_font = Font(bold=True, size=12)
-    header_font = Font(bold=True)
-    header_fill = PatternFill("solid", fgColor="D9D9D9")
-
-    total_rows = 0
-    total_fixed_date = 0
-    total_filled_price = 0
-    total_no_price = 0
-    summary = []
-
+def read_altas(service):
+    """Lee todas las hojas de técnico y devuelve dicts normalizados (una por fila válida)."""
+    altas = []
+    stats = defaultdict(lambda: {"fixed_date": 0, "filled_price": 0, "no_price": 0})
     for tab in TECS:
         rows = service.spreadsheets().values().get(
             spreadsheetId=SID, range=f"'{tab}'!A3:E"
         ).execute().get("values", [])
-
-        altas = []
-        fixed_date = filled_price = no_price = 0
         for row in rows:
             row = row + [""] * (5 - len(row))
             fecha, orden, codigo, _precio_contratista, tecnico = row
             if not is_order(orden):
                 continue
             day = day_of(fecha)
-            if day is None or not (1 <= day <= 30):
+            if day is None or not (1 <= day <= 31):
                 print(f"  ⚠ {tab}: fecha ilegible {fecha!r} orden={orden} — omitida")
                 continue
-
-            fecha_ok = f"{day:02d}/06/2026"
+            fecha_ok = f"{day:02d}/{MES_NUM:02d}/{ANIO}"
             if str(fecha).strip().replace(" ", "") != fecha_ok:
-                fixed_date += 1
-
+                stats[tab]["fixed_date"] += 1
             codigo = str(codigo).strip().upper()
             precio = money(tecnico)
-            if precio is None:
+            had_price = precio is not None
+            if not had_price:
                 precio = PRECIO_TECNICO.get(codigo)
                 if precio is not None:
-                    filled_price += 1
+                    stats[tab]["filled_price"] += 1
                 else:
-                    no_price += 1
-            altas.append([fecha_ok, str(orden).strip(), codigo, precio])
+                    stats[tab]["no_price"] += 1
+            altas.append({
+                "tecnico": tab, "orden": str(orden).strip(),
+                "clave": norm_order(orden), "codigo": codigo,
+                "dia": day, "fecha": fecha_ok, "precio": precio,
+                "had_price": had_price,
+            })
+    return altas, stats
 
-        altas.sort(key=lambda a: (day_of(a[0]), a[1]))
 
+def dedup_same_day(altas):
+    """Colapsa (técnico, orden, día) repetidos a una sola fila; prefiere la que trae precio.
+
+    Devuelve (altas_unicas, removidas_por_tecnico).
+    """
+    best = {}
+    removed = defaultdict(int)
+    order_seen = defaultdict(int)
+    for a in altas:
+        key = (a["tecnico"], a["clave"], a["dia"])
+        if key not in best:
+            best[key] = a
+            order_seen[key] += 1
+        else:
+            order_seen[key] += 1
+            # preferir la fila con precio de fuente (contador)
+            if a["had_price"] and not best[key]["had_price"]:
+                best[key] = a
+            removed[a["tecnico"]] += 1
+    return list(best.values()), removed
+
+
+def find_flags(altas):
+    """Duplicados que NO se resuelven solos: mismo orden en días distintos o en 2 técnicos."""
+    by_tec_order = defaultdict(list)     # (tec, clave) -> [dias]
+    by_order = defaultdict(set)          # clave -> {tecnicos}
+    detail = defaultdict(list)           # clave -> [(tec, fecha, precio)]
+    for a in altas:
+        by_tec_order[(a["tecnico"], a["clave"])].append(a["dia"])
+        by_order[a["clave"]].add(a["tecnico"])
+        detail[a["clave"]].append((a["tecnico"], a["fecha"], a["precio"]))
+    multidia = {k: v for k, v in by_tec_order.items() if len(set(v)) > 1}
+    multitec = {k: v for k, v in by_order.items() if len(v) > 1}
+    return multidia, multitec, detail
+
+
+def main() -> None:
+    write = "--write" in sys.argv
+    service = get_sheets_service()
+
+    altas, stats = read_altas(service)
+    altas, removed = dedup_same_day(altas)
+    multidia, multitec, detail = find_flags(altas)
+
+    workbook = Workbook()
+    workbook.remove(workbook.active)
+    title_font = Font(bold=True, size=12)
+    header_font = Font(bold=True)
+    header_fill = PatternFill("solid", fgColor="D9D9D9")
+
+    per_tec = defaultdict(list)
+    for a in altas:
+        per_tec[a["tecnico"]].append(a)
+
+    for tab in TECS:
+        items = sorted(per_tec[tab], key=lambda a: (a["dia"], a["orden"]))
         sheet = workbook.create_sheet(tab)
-        sheet["A1"] = f"{tab} — JUNIO 2026"
+        sheet["A1"] = f"{tab} — {MES} {ANIO}"
         sheet["A1"].font = title_font
         for col, name in zip("ABCD", ["FECHA", "ORDEN", "CODIGO", "TECNICO"]):
             cell = sheet[f"{col}2"]
             cell.value = name
             cell.font = header_font
             cell.fill = header_fill
-        for i, alta in enumerate(altas, start=3):
-            for j, val in enumerate(alta):
+        for i, a in enumerate(items, start=3):
+            for j, val in enumerate([a["fecha"], a["orden"], a["codigo"], a["precio"]]):
                 sheet.cell(row=i, column=j + 1, value=val)
         for col, width in zip("ABCD", (12, 22, 16, 10)):
             sheet.column_dimensions[col].width = width
 
-        summary.append((tab, len(altas), fixed_date, filled_price, no_price))
-        total_rows += len(altas)
-        total_fixed_date += fixed_date
-        total_filled_price += filled_price
-        total_no_price += no_price
+    print("\nTécnico    altas  fecha_corr  precio_relleno  dup_mismodia_elim  sin_precio")
+    for tab in TECS:
+        s = stats[tab]
+        print(f"  {tab:8} {len(per_tec[tab]):5}   {s['fixed_date']:8}   "
+              f"{s['filled_price']:12}   {removed[tab]:15}   {s['no_price']}")
+    print(f"  {'TOTAL':8} {len(altas):5}   {sum(s['fixed_date'] for s in stats.values()):8}   "
+          f"{sum(s['filled_price'] for s in stats.values()):12}   "
+          f"{sum(removed.values()):15}   {sum(s['no_price'] for s in stats.values())}")
 
-    print("\nTécnico    altas  fecha_corr  precio_relleno  sin_precio")
-    for tab, n, fd, fp, np in summary:
-        print(f"  {tab:8} {n:5}   {fd:8}   {fp:12}   {np}")
-    print(f"  {'TOTAL':8} {total_rows:5}   {total_fixed_date:8}   "
-          f"{total_filled_price:12}   {total_no_price}")
+    print("\n⚠ REVISAR — mismo orden en DÍAS distintos (mismo técnico):")
+    if multidia:
+        for (tec, clave), dias in multidia.items():
+            print(f"  {tec}: {clave} en días {sorted(set(dias))}")
+    else:
+        print("  ninguno")
+
+    print("\n⚠ REVISAR — mismo orden en DOS técnicos:")
+    if multitec:
+        for clave, tecs in multitec.items():
+            print(f"  {clave}: {detail[clave]}")
+    else:
+        print("  ninguno")
 
     if write:
         workbook.save(OUT)
