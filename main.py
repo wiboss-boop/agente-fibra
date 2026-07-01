@@ -149,6 +149,17 @@ def main() -> None:
             if result.get("skip"):
                 logger.info("PDF omitido (KO): %s", pdf.name)
                 continue
+            # La fecha interna del PDF es poco fiable (fechas sueltas del documento,
+            # plantillas con años viejos). El alta pertenece al día de proceso, igual
+            # que las incidencias Orange/Kairos y las SIN ALTAS.
+            fecha_pdf = result.get("fecha")
+            fecha_proceso = target_date.strftime("%d/%m/%Y")
+            if fecha_pdf and fecha_pdf != fecha_proceso:
+                logger.warning(
+                    "Fecha del PDF %s ('%s') difiere del día de proceso ('%s'); se usa el día de proceso",
+                    pdf.name, fecha_pdf, fecha_proceso,
+                )
+            result["fecha"] = fecha_proceso
             result["_source"] = pdf.name
             records.append(result)
         except Exception as exc:
