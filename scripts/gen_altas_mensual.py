@@ -45,6 +45,24 @@ PRECIO_TECNICO = {
     "ZA_TRASLADO": 40,
 }
 
+# ---------------------------------------------------------------------------
+# Resoluciones manuales de duplicados ambiguos (decisión del usuario).
+# Específicas del mes: la misma orden no puede pagarse dos veces.
+# ---------------------------------------------------------------------------
+# (técnico, clave) -> día a conservar; se eliminan las demás fechas de esa orden.
+KEEP_ONE_DAY = {
+    ("JOEL", "OT107152"): 22,   # instalación pagada 3 veces (22/25/26) -> una sola
+}
+# (técnico, clave) -> nota a escribir en la fila (col NOTA).
+NOTES = {
+    ("JEAN", "SC2026202530"): "Tambien reportada por MARTIN 18/06; se conserva aqui por reporte previo (17/06)",
+    ("MARTIN", "SC2026202530"): "Duplicada con JEAN 17/06 — NO se paga aqui",
+}
+# (técnico, clave) que se dejan VISIBLES pero sin pago (precio 0).
+NO_PAY = {
+    ("MARTIN", "SC2026202530"),
+}
+
 
 def is_order(orden) -> bool:
     text = str(orden).strip()
@@ -98,9 +116,27 @@ def read_altas(service):
                 "tecnico": tab, "orden": str(orden).strip(),
                 "clave": norm_order(orden), "codigo": codigo,
                 "dia": day, "fecha": fecha_ok, "precio": precio,
-                "had_price": had_price,
+                "had_price": had_price, "nota": "",
             })
     return altas, stats
+
+
+def apply_resolutions(altas):
+    """Aplica las decisiones manuales sobre duplicados ambiguos. Devuelve las altas finales."""
+    result = []
+    for a in altas:
+        sig = (a["tecnico"], a["clave"])
+        keep_day = KEEP_ONE_DAY.get(sig)
+        if keep_day is not None and a["dia"] != keep_day:
+            continue  # orden repetida en otro día -> se descarta
+        if keep_day is not None and a["dia"] == keep_day:
+            a["nota"] = f"Orden única (registrada varias veces en el mes; se paga 1 vez)"
+        if sig in NO_PAY:
+            a["precio"] = 0
+        if sig in NOTES:
+            a["nota"] = NOTES[sig]
+        result.append(a)
+    return result
 
 
 def dedup_same_day(altas):
@@ -145,6 +181,7 @@ def main() -> None:
 
     altas, stats = read_altas(service)
     altas, removed = dedup_same_day(altas)
+    altas = apply_resolutions(altas)
     multidia, multitec, detail = find_flags(altas)
 
     workbook = Workbook()
@@ -162,15 +199,15 @@ def main() -> None:
         sheet = workbook.create_sheet(tab)
         sheet["A1"] = f"{tab} — {MES} {ANIO}"
         sheet["A1"].font = title_font
-        for col, name in zip("ABCD", ["FECHA", "ORDEN", "CODIGO", "TECNICO"]):
+        for col, name in zip("ABCDE", ["FECHA", "ORDEN", "CODIGO", "TECNICO", "NOTA"]):
             cell = sheet[f"{col}2"]
             cell.value = name
             cell.font = header_font
             cell.fill = header_fill
         for i, a in enumerate(items, start=3):
-            for j, val in enumerate([a["fecha"], a["orden"], a["codigo"], a["precio"]]):
+            for j, val in enumerate([a["fecha"], a["orden"], a["codigo"], a["precio"], a["nota"]]):
                 sheet.cell(row=i, column=j + 1, value=val)
-        for col, width in zip("ABCD", (12, 22, 16, 10)):
+        for col, width in zip("ABCDE", (12, 22, 16, 10, 52)):
             sheet.column_dimensions[col].width = width
 
     print("\nTécnico    altas  fecha_corr  precio_relleno  dup_mismodia_elim  sin_precio")
