@@ -1,25 +1,28 @@
 #!/usr/bin/env python3
-"""Crea el spreadsheet fibra de JULIO_2026 duplicando la estructura del sheet actual (JUNIO).
+"""Crea el spreadsheet fibra del mes duplicando la estructura del sheet del mes anterior.
 
 - Técnicos: solo encabezado (filas 1-2: nombre + FECHA/ORDEN/CODIGO/PRECIO/TECNICO), SIN datos.
 - Base / Hoja6: contenido íntegro.
 - Descuentos: solo encabezado (fila 1).
 - Se omiten Hoja1 y las pestañas 'Discrepancias …' viejas.
-- Se crea con el SERVICE ACCOUNT (misma identidad que escribe el agente en prod) y se
-  comparte con el humano (salamanca118) para que pueda verlo/editarlo.
+- Se crea con la cuenta humana (salamanca118) y se da acceso de editor al SERVICE ACCOUNT
+  (misma identidad con la que el agente escribe en prod).
 
-Uso:  ... crear_sheet_julio.py [--write]   (sin --write = dry-run, no crea nada)
+Uso:
+    crear_sheet_mensual.py --mes AGOSTO_2026 --source <id-o-url-del-mes-anterior> [--write]
+
+Sin --write es dry-run: no crea nada, solo imprime el plan de pestañas.
 """
+import argparse
 import json
 import os
+import re
 import sys
 from pathlib import Path
 
 from googleapiclient.discovery import build
 
 SA_FILE = "/Users/samaro/Documents/secomcol-bot/secomcol-bot-54966487a09b.json"
-SOURCE_ID = "1JjUY08AJmICiPmc9xXDJEdqKFIv2rIln6AYYWUxzMwI"   # sheet actual (JUNIO)
-NUEVO_TITULO = "JULIO_2026"
 # El agente en prod escribe con el service account -> hay que darle acceso de editor.
 SA_EMAIL = json.load(open(SA_FILE))["client_email"]
 SCOPES = ["https://www.googleapis.com/auth/spreadsheets",
@@ -43,21 +46,45 @@ def _creds():
     from google.auth.transport.requests import Request
     from google_auth_oauthlib.flow import InstalledAppFlow
 
+    from google.auth.exceptions import RefreshError
+
     creds = None
     if Path(OAUTH_TOKEN).exists():
         creds = Credentials.from_authorized_user_file(OAUTH_TOKEN, SCOPES)
     if not creds or not creds.valid:
         if creds and creds.expired and creds.refresh_token:
-            creds.refresh(Request())
-        else:
+            try:
+                creds.refresh(Request())
+            except RefreshError:
+                # el refresh token caduca (app en modo testing) -> volver a consentir
+                print("⚠ token de Drive caducado, abriendo consentimiento en el navegador…")
+                creds = None
+        if not creds or not creds.valid:
             flow = InstalledAppFlow.from_client_secrets_file(OAUTH_CLIENT, SCOPES)
             creds = flow.run_local_server(port=0, prompt="consent")
         Path(OAUTH_TOKEN).write_text(creds.to_json())
     return creds
 
 
+def _sheet_id(valor):
+    """Acepta el ID pelado o la URL completa del spreadsheet."""
+    m = re.search(r"/spreadsheets/d/([A-Za-z0-9_-]+)", valor)
+    return m.group(1) if m else valor
+
+
 def main():
-    write = "--write" in sys.argv
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("--mes", required=True,
+                    help="título del sheet nuevo, p.ej. AGOSTO_2026")
+    ap.add_argument("--source", required=True,
+                    help="ID o URL del sheet del mes anterior (origen de la estructura)")
+    ap.add_argument("--write", action="store_true",
+                    help="crea el sheet de verdad (sin este flag es dry-run)")
+    args = ap.parse_args()
+
+    write = args.write
+    NUEVO_TITULO = args.mes
+    SOURCE_ID = _sheet_id(args.source)
     creds = _creds()
     sheets = build("sheets", "v4", credentials=creds)
     drive = build("drive", "v3", credentials=creds)
@@ -80,7 +107,7 @@ def main():
         plan.append((tab, modo))
 
     print(f"Origen: {src_meta['properties']['title']} ({SOURCE_ID})")
-    print("Plan de pestañas para JULIO_2026:")
+    print(f"Plan de pestañas para {NUEVO_TITULO}:")
     for tab, modo in plan:
         print(f"  {tab:12} -> {modo}")
     omitidas = [t for t in src_tabs if t not in [p[0] for p in plan]]
