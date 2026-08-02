@@ -32,7 +32,11 @@
       "Bash(sed -i '' 's/^\"\"\"Genera REGISTRO_JORNADA_JUNIO.xlsx a partir de la plantilla de mayo\\\\./\"\"\"Genera REGISTRO_JORNADA_<MES>.xlsx a partir del registro del mes anterior./' scripts/gen_jornada_mensual.py)",
       "Bash(PYTHONPATH=. ./venv/bin/python scripts/gen_jornada_mensual.py --mes JULIO)",
       "Bash(./venv/bin/python -m py_compile scripts/crear_sheet_mensual.py scripts/gen_altas_mensual.py scripts/gen_jornada_mensual.py)",
-      "Bash(PYTHONPATH=. ./venv/bin/python scripts/gen_altas_mensual.py --mes MARZO)"
+      "Bash(PYTHONPATH=. ./venv/bin/python scripts/gen_altas_mensual.py --mes MARZO)",
+      "Bash(git status *)",
+      "Bash(git add *)",
+      "Bash(git commit -q -m 'chore: ignorar .DS_Store y actualizar permisos locales *)",
+      "Bash(git push *)"
     ]
   }
 }
