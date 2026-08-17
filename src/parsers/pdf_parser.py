@@ -286,12 +286,16 @@ def _codigo_jazztel(text: str) -> Tuple[Optional[str], bool]:
 def _codigo_orange(text: str) -> Tuple[Optional[str], bool]:
     """
     Devuelve (codigo, incidencia).
-    - Posventa OK → AVERIA OK
+    - Posventa OK / Boletín Avería → AVERIA OK
     - Datos acometida: leer --Reutiliza Acometida y Modelo del componente
-    - Sin info → MM17
+    - Sin info → incidencia (revisar a mano; nunca tarifar a ciegas)
     """
     # Boletín Posventa = avería resuelta
     if re.search(r'bolet[ií]n\s+digital\s+posventa', text, re.IGNORECASE):
+        return "AVERIA OK", False
+    # Boletín Avería (el scraper solo descarga los cerrados en OK desde 34baec8):
+    # sin este mapeo caía al fallback y se apuntaba como MM17 (reutilizada)
+    if re.search(r'bolet[ií]n\s+digital\s+aver[ií]a', text, re.IGNORECASE):
         return "AVERIA OK", False
     # PDF de reutilización: usar --Reutiliza Acometida
     if "datos acometida" in text.lower():
@@ -306,7 +310,10 @@ def _codigo_orange(text: str) -> Tuple[Optional[str], bool]:
     meters = _extract_meters(text)
     if meters is not None:
         return _meters_to_code(meters), False
-    return "MM17", False
+    # Tipo de documento Orange desconocido: marcar incidencia para revisión manual.
+    # Antes devolvía MM17 y cualquier formato nuevo se tarifaba como reutilizada.
+    logger.debug("PDF Orange sin tipo reconocible — marcado como incidencia")
+    return None, True
 
 
 # ---------------------------------------------------------------------------
