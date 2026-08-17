@@ -19,8 +19,6 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-import yaml
-
 from src.reconciliation import extract_altas, extract_anexo, reconcile, linea_of
 from src.reconciliation.sheet_writer import write_discrepancias
 
@@ -30,8 +28,10 @@ MESES = ["ENERO", "FEBRERO", "MARZO", "ABRIL", "MAYO", "JUNIO",
 
 
 def _spreadsheet_id() -> str:
-    with open("config/credentials.yaml") as f:
-        return yaml.safe_load(f)["google_sheets"]["spreadsheet_id"]
+    # Misma resolución que el agente: ACTIVE_SHEET_ID manda y, si no está y el
+    # yaml tiene el campo vacío, ValueError — nunca conciliar contra un mes viejo.
+    from src.sheets.writer import _load_spreadsheet_id
+    return _load_spreadsheet_id()
 
 
 def _is_excel(path: Path) -> bool:

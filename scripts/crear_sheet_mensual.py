@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """Crea el spreadsheet fibra del mes duplicando la estructura del sheet del mes anterior.
 
-- Técnicos: solo encabezado (filas 1-2: nombre + FECHA/ORDEN/CODIGO/PRECIO/TECNICO), SIN datos.
+- Técnicos: solo encabezado (filas 1-2: nombre + FECHA/ORDEN/CODIGO/PRECIO/TECNICO), SIN datos,
+  y fórmulas VLOOKUP contra Base sembradas en D3:E500 (el agente de fibra solo escribe A-C;
+  sin las fórmulas, PRECIO/TECNICO quedan vacíos — pasó todo agosto-2026).
 - Base / Hoja6: contenido íntegro.
 - Descuentos: solo encabezado (fila 1).
 - Se omiten Hoja1 y las pestañas 'Discrepancias …' viejas.
@@ -38,6 +40,11 @@ OMITIR_PREFIJOS = ("Hoja1", "Discrepancias")
 
 # Orden de las pestañas en el sheet nuevo
 ORDEN = ["Base"] + TECNICOS + ["Hoja6", "Descuentos"]
+
+# Las fórmulas de tarifado se siembran hasta esta fila (igual que hacía nuevo_mes.py).
+# En las hojas que escribe el bot de alarmas (JEAN/JOEL/DIANA/MARTIN) el bot pisa la
+# fórmula con el valor resuelto al escribir cada fila — mismo comportamiento que julio.
+FORMULA_LAST_ROW = 500
 
 
 def _creds():
@@ -146,6 +153,36 @@ def main():
             body={"valueInputOption": "USER_ENTERED", "data": data},
         ).execute()
 
+    # sembrar fórmulas de tarifado en D/E de las hojas de técnico + formato €
+    def formulas(row):
+        return [f'=IF($C{row}="","",IFERROR(VLOOKUP($C{row},Base!$A:$C,{i},FALSE),""))'
+                for i in (2, 3)]
+
+    tabs_tecnico = [tab for tab, modo in plan if modo == "header2"]
+    sheets.spreadsheets().values().batchUpdate(
+        spreadsheetId=nuevo_id,
+        body={"valueInputOption": "USER_ENTERED", "data": [
+            {"range": f"'{tab}'!D3:E{FORMULA_LAST_ROW}",
+             "values": [formulas(r) for r in range(3, FORMULA_LAST_ROW + 1)]}
+            for tab in tabs_tecnico
+        ]},
+    ).execute()
+
+    ids_nuevo = {s["properties"]["title"]: s["properties"]["sheetId"]
+                 for s in nuevo["sheets"]}
+    sheets.spreadsheets().batchUpdate(spreadsheetId=nuevo_id, body={"requests": [
+        {"repeatCell": {
+            "range": {"sheetId": ids_nuevo[tab], "startRowIndex": 2,
+                      "endRowIndex": FORMULA_LAST_ROW,
+                      "startColumnIndex": 3, "endColumnIndex": 5},
+            "cell": {"userEnteredFormat": {"numberFormat":
+                     {"type": "CURRENCY", "pattern": '"€"#,##0.00'}}},
+            "fields": "userEnteredFormat.numberFormat",
+        }} for tab in tabs_tecnico
+    ]}).execute()
+    print(f"   Fórmulas VLOOKUP sembradas en D3:E{FORMULA_LAST_ROW} "
+          f"de {len(tabs_tecnico)} hojas de técnico")
+
     # dar acceso de editor al service account (el agente en prod escribe con él)
     drive.permissions().create(
         fileId=nuevo_id,
@@ -157,7 +194,10 @@ def main():
     print(f"   ID:  {nuevo_id}")
     print(f"   URL: https://docs.google.com/spreadsheets/d/{nuevo_id}")
     print(f"   Editor: {SA_EMAIL} (service account del agente)")
-    print("\n⚠ Falta apuntar el agente: ACTIVE_SHEET_ID =", nuevo_id)
+    print("\n⚠ Faltan las DOS variables de Railway (en agosto-2026 solo se cambió")
+    print("  la primera y las alarmas escribieron todo el mes en el sheet viejo):")
+    print(f"    railway variables -s agente-fibra --set \"ACTIVE_SHEET_ID={nuevo_id}\"")
+    print(f"    railway variables -s web --set \"GOOGLE_SHEET_ID_ALARMAS={nuevo_id}\"")
 
 
 if __name__ == "__main__":
