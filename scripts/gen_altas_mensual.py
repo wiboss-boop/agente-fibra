@@ -230,6 +230,20 @@ def dedup_same_day(altas):
     return list(best.values()), removed
 
 
+def sin_precio_por_codigo(altas):
+    """{codigo: {tecnico: n}} de las altas que se quedaron sin importe.
+
+    Sin precio la fila sale en blanco en la nomina, o sea que esa alta no se paga.
+    Suele ser un codigo nuevo que falta en PRECIO_TECNICO, y para añadirlo hay que
+    saber CUAL es: antes solo se contaban.
+    """
+    faltan = defaultdict(lambda: defaultdict(int))
+    for a in altas:
+        if a["precio"] is None:
+            faltan[a["codigo"] or "(sin código)"][a["tecnico"]] += 1
+    return faltan
+
+
 def find_flags(altas):
     """Duplicados que NO se resuelven solos: mismo orden en días distintos o en 2 técnicos."""
     by_tec_order = defaultdict(list)     # (tec, clave) -> [dias]
@@ -344,16 +358,36 @@ def main() -> None:
     else:
         print("  ninguno")
 
+    faltan = sin_precio_por_codigo(altas)
+    print("\n⚠ REVISAR — códigos SIN PRECIO (esas altas saldrían en blanco):")
+    if faltan:
+        for codigo, por_tecnico in sorted(faltan.items(),
+                                          key=lambda kv: -sum(kv[1].values())):
+            reparto = ", ".join(f"{t} {n}" for t, n in sorted(por_tecnico.items()))
+            print(f"  {codigo:18} {sum(por_tecnico.values()):3}  ({reparto})")
+        print("  → añade el precio al técnico en PRECIO_TECNICO")
+    else:
+        print("  ninguno")
+
     if write:
         workbook.save(OUT)
         print(f"\n✅ Escrito: {OUT}")
     else:
         print("\n(dry-run — usa --write para guardar el .xlsx)")
 
-    if args.strict and (multidia or multitec):
-        print(f"\n✗ {len(multidia) + len(multitec)} duplicado(s) ambiguo(s) sin resolver "
-              f"para {MES} {ANIO}: añádelos a RESOLUCIONES antes de cerrar el mes.")
-        sys.exit(2)
+    if args.strict:
+        # Las dos cosas dejan la nomina mal: una orden pagada dos veces, o un alta
+        # pagada a cero. Ninguna se decide sola.
+        pendientes = []
+        if multidia or multitec:
+            pendientes.append(f"{len(multidia) + len(multitec)} duplicado(s) ambiguo(s)")
+        if faltan:
+            n_altas = sum(sum(t.values()) for t in faltan.values())
+            pendientes.append(f"{n_altas} alta(s) sin precio en {len(faltan)} código(s)")
+        if pendientes:
+            print(f"\n✗ {MES} {ANIO}: " + " y ".join(pendientes) +
+                  " sin resolver. Ver arriba.")
+            sys.exit(2)
 
 
 if __name__ == "__main__":
