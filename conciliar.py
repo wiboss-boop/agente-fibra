@@ -15,16 +15,21 @@ Sin --altas/--anexos descubre los archivos automáticamente en la estructura de 
           los anexos del mes de trabajo anterior; el de <MES+2> cubre el desfase 21→20).
 """
 import argparse
+import os
 import sys
 from datetime import datetime
 from pathlib import Path
 
+from src import meses
 from src.reconciliation import extract_altas, extract_anexo, reconcile, linea_of
 from src.reconciliation.sheet_writer import write_discrepancias
 
-BASE = Path("/Users/samaro/Library/CloudStorage/GoogleDrive-salamanca118@gmail.com/Mi unidad/SECOMCOL")
-MESES = ["ENERO", "FEBRERO", "MARZO", "ABRIL", "MAYO", "JUNIO",
-         "JULIO", "AGOSTO", "SEPTIEMBRE", "OCTUBRE", "NOVIEMBRE", "DICIEMBRE"]
+BASE = Path(os.environ.get(
+    "SECOMCOL_BASE",
+    "/Users/samaro/Library/CloudStorage/GoogleDrive-salamanca118@gmail.com/"
+    "Mi unidad/SECOMCOL",
+))
+MESES = list(meses.MESES)
 
 
 def _spreadsheet_id() -> str:
