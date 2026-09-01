@@ -4,19 +4,29 @@ Todo el cierre se lanza desde `scripts/cierre_mensual.py`, que encadena los paso
 orden y verifica los dos puntos donde el cierre se ha roto antes.
 
 ```bash
+cd ~/agente-fibra          # desde la raíz: los tokens se buscan en config/
+
 # 1. Ver el plan (no toca nada). Los meses se deducen de la fecha de hoy.
-PYTHONPATH=. venv/bin/python scripts/cierre_mensual.py
+venv/bin/python scripts/cierre_mensual.py
 
 # 2. Ejecutarlo
-PYTHONPATH=. venv/bin/python scripts/cierre_mensual.py --write
+venv/bin/python scripts/cierre_mensual.py --write
 
 # Repetir un paso suelto, o cerrar un mes que no es el de hoy
-PYTHONPATH=. venv/bin/python scripts/cierre_mensual.py --paso 2 --write
-PYTHONPATH=. venv/bin/python scripts/cierre_mensual.py --mes-nuevo SEPTIEMBRE --anio 2026
+venv/bin/python scripts/cierre_mensual.py --paso 2 --write
+venv/bin/python scripts/cierre_mensual.py --mes-nuevo SEPTIEMBRE --anio 2026
 ```
 
-Corre **en el Mac**, no en Railway: necesita el token de Drive de la cuenta humana, el
-JSON del service account y la CLI de `railway` logueada.
+Corre **en el Mac**, no en Railway. Antes de lanzarlo, que estas tres cosas respondan:
+
+```bash
+railway whoami                          # CLI logueada
+ls config/token_drive.json              # token de Drive de la cuenta humana
+ls "$SECOMCOL_SA_FILE"                  # JSON del service account (o su ruta por defecto)
+```
+
+Si el token de Drive ha caducado, el paso 1 abre el navegador para volver a consentir;
+no es un error. Los scripts se encuentran `src/` solos, no hace falta `PYTHONPATH`.
 
 ## Los pasos, y por qué en este orden
 
