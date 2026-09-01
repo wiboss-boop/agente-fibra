@@ -24,6 +24,8 @@ Requisitos (todos locales, no corre en Railway): venv con las dependencias, el t
 Drive de la cuenta humana, el JSON del service account y la CLI de railway logueada.
 """
 import argparse
+import json
+import re
 import subprocess
 import sys
 from datetime import date
@@ -56,6 +58,42 @@ def _run(cmd, check=True, capture=False):
 
 def _script(nombre, *args):
     return [sys.executable, str(RAIZ / "scripts" / nombre), *args]
+
+
+def _leer_variables(servicio):
+    """{VAR: valor} del servicio, SIN imprimir nada.
+
+    `railway variables` pinta una tabla con todo: la API key de Anthropic, el token de
+    Railway y la clave privada del service account incluidas. No tienen por qué acabar
+    en el scrollback solo para comprobar un ID.
+
+    Devuelve None si esta versión de la CLI no sabe dar JSON; entonces se compara contra
+    el texto (ver _texto_variables).
+    """
+    proc = subprocess.run(["railway", "variables", "-s", servicio, "--json"],
+                          cwd=RAIZ, text=True, capture_output=True)
+    if proc.returncode == 0:
+        try:
+            datos = json.loads(proc.stdout)
+        except json.JSONDecodeError:
+            return None
+        if isinstance(datos, dict):
+            return datos
+    return None
+
+
+def _texto_variables(servicio):
+    """La salida de `railway variables` dejando solo lo que puede formar un ID.
+
+    La tabla parte los valores largos en varias líneas dentro del marco
+    (…emWkbtka2Y / HCE), así que un ID de 44 caracteres NUNCA aparece entero: hay que
+    quitar marco y saltos antes de buscarlo. Tampoco se imprime, por lo mismo de arriba.
+    """
+    proc = subprocess.run(["railway", "variables", "-s", servicio],
+                          cwd=RAIZ, text=True, capture_output=True)
+    if proc.returncode != 0:
+        return None
+    return re.sub(r"[^A-Za-z0-9_-]", "", proc.stdout or "")
 
 
 # ---------------------------------------------------------------------------
@@ -101,8 +139,14 @@ def paso_2_railway(ctx, write):
     print("\n  Verificando que las dos variables quedaron en el Sheet nuevo…")
     fallos = []
     for servicio, var in VARIABLES_RAILWAY.items():
-        proc = _run(["railway", "variables", "-s", servicio], check=False, capture=True)
-        if proc.returncode != 0 or sid not in (proc.stdout or ""):
+        datos = _leer_variables(servicio)
+        if datos is not None:
+            ok = datos.get(var) == sid          # comparación exacta, variable a variable
+        else:
+            plano = _texto_variables(servicio)  # CLI sin --json: buscar el ID en el texto
+            ok = plano is not None and sid in plano
+        print(f"    {'✓' if ok else '✗'} {servicio}/{var}")
+        if not ok:
             fallos.append(f"{servicio}/{var}")
     if fallos:
         sys.exit(f"\n✗ Estas variables NO apuntan a {sid}: {', '.join(fallos)}\n"
@@ -211,7 +255,9 @@ def main():
         funcion(ctx, args.write)
 
     print("\n" + "=" * 70)
-    if args.write:
+    if args.write and args.paso:
+        print(f"  ✅ Paso {args.paso} ejecutado ({PASOS[args.paso - 1][0]})")
+    elif args.write:
         print(f"  ✅ Cierre de {mes_cerrado} {anio_cerrado} ejecutado")
         print("  Comprueba mañana que el agente escribió en el Sheet nuevo.")
     else:
