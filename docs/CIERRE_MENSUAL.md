@@ -70,11 +70,24 @@ se colapsan solos, pero la misma orden en **dos días** o en **dos técnicos** l
 Añade la decisión a `RESOLUCIONES` con la clave `("MES", AÑO)` — **nunca** heredar las de
 otro mes.
 
-**Código sin precio.** El alta saldría con el importe en blanco, o sea sin pagar. Suele ser
-un código nuevo del contratista; añádelo a `PRECIO_TECNICO` con el precio al técnico.
+**Código sin precio.** El alta saldría con el importe en blanco, o sea sin pagar. Es un
+código nuevo del contratista; añádelo a `PRECIO_TECNICO` con el precio al técnico.
 
 En los dos casos el listado sale bajo `⚠ REVISAR`, con el código y el reparto por técnico.
 Después: `scripts/cierre_mensual.py --paso 3 --write`.
+
+## Órdenes pendientes (no bloquean)
+
+Aparte sale una sección informativa con las altas sin precio cuyo código no es una tarifa,
+porque la orden está a medias y todavía no se paga:
+
+| Código | Qué es |
+|--------|--------|
+| `SIN PARTE` | Orden de Kairos que aún no tiene parte (`src/scrapers/kairos.py`). |
+| *(sin código)* | Incidencia de Orange sin boletín OK: el agente solo escribe fecha y orden, y marca la columna G del Sheet. |
+
+Son discrepancias que se revisan a mano cada mes, así que se listan pero **no** paran el
+cierre. Están en `CODIGOS_PENDIENTES`, en `scripts/gen_altas_mensual.py`.
 
 ## Registro de Sheets
 

@@ -53,6 +53,13 @@ STOP = {"FESTIVOS", "DESCUENTOS", "TOTAL", "TOTALES", "SUBTOTAL", "IRPF",
         "SECOMCOL", "SEG SOCIAL", "G BRUTA", "SIN ALTAS", "SIN PARTE",
         "RESUMEN", "OBSERVACIONES", "EMBARGO", "MULTA", "GASOLINA"}
 
+# Códigos que NO son una tarifa: la orden está pendiente de resolver a mano y todavía no
+# es un alta pagable, asi que no tener precio es lo normal y no debe frenar el cierre.
+#   ""          -> incidencia de Orange sin boletín OK (_write_incidencia deja el código
+#                  vacío y marca la columna G del Sheet).
+#   SIN PARTE   -> orden de Kairos que aún no tiene parte (scrapers/kairos.py).
+CODIGOS_PENDIENTES = {"", "SIN PARTE"}
+
 # Precio al técnico por código (derivado de junio; consistente con mayo)
 PRECIO_TECNICO = {
     "AVERIA OK": 10, "MM01": 27, "MM02": 27, "MM03": 27, "MM04": 27,
@@ -80,6 +87,13 @@ RESOLUCIONES = {
         # (técnico, clave) que se dejan VISIBLES pero sin pago (precio 0).
         "no_pay": {
             ("MARTIN", "SC2026202530"),
+        },
+    },
+    ("AGOSTO", 2026): {
+        "keep_one_day": {
+            # Reportada el 25 y el 27 con las dos filas idénticas -> se paga una sola vez,
+            # el día del trabajo. Decisión del usuario, 01/09/2026.
+            ("LUIS E", "ATC-9071506"): 25,
         },
     },
 }
@@ -240,8 +254,19 @@ def sin_precio_por_codigo(altas):
     faltan = defaultdict(lambda: defaultdict(int))
     for a in altas:
         if a["precio"] is None:
-            faltan[a["codigo"] or "(sin código)"][a["tecnico"]] += 1
+            faltan[a["codigo"]][a["tecnico"]] += 1
     return faltan
+
+
+def _imprimir_sin_precio(grupos):
+    """Imprime {codigo: {tecnico: n}} ordenado por volumen. Devuelve el total de altas."""
+    total = 0
+    for codigo, por_tecnico in sorted(grupos.items(), key=lambda kv: -sum(kv[1].values())):
+        n = sum(por_tecnico.values())
+        total += n
+        reparto = ", ".join(f"{t} {c}" for t, c in sorted(por_tecnico.items()))
+        print(f"  {codigo or '(sin código)':18} {n:3}  ({reparto})")
+    return total
 
 
 def find_flags(altas):
@@ -358,13 +383,18 @@ def main() -> None:
     else:
         print("  ninguno")
 
-    faltan = sin_precio_por_codigo(altas)
+    sin_precio = sin_precio_por_codigo(altas)
+    pendientes = {c: t for c, t in sin_precio.items() if c in CODIGOS_PENDIENTES}
+    sin_tarifa = {c: t for c, t in sin_precio.items() if c not in CODIGOS_PENDIENTES}
+
+    print("\nℹ Órdenes pendientes de resolver a mano (sin tarifa por serlo; no bloquean):")
+    n_pendientes = _imprimir_sin_precio(pendientes) if pendientes else 0
+    if not pendientes:
+        print("  ninguna")
+
     print("\n⚠ REVISAR — códigos SIN PRECIO (esas altas saldrían en blanco):")
-    if faltan:
-        for codigo, por_tecnico in sorted(faltan.items(),
-                                          key=lambda kv: -sum(kv[1].values())):
-            reparto = ", ".join(f"{t} {n}" for t, n in sorted(por_tecnico.items()))
-            print(f"  {codigo:18} {sum(por_tecnico.values()):3}  ({reparto})")
+    n_sin_tarifa = _imprimir_sin_precio(sin_tarifa) if sin_tarifa else 0
+    if sin_tarifa:
         print("  → añade el precio al técnico en PRECIO_TECNICO")
     else:
         print("  ninguno")
@@ -378,14 +408,14 @@ def main() -> None:
     if args.strict:
         # Las dos cosas dejan la nomina mal: una orden pagada dos veces, o un alta
         # pagada a cero. Ninguna se decide sola.
-        pendientes = []
+        bloqueos = []
         if multidia or multitec:
-            pendientes.append(f"{len(multidia) + len(multitec)} duplicado(s) ambiguo(s)")
-        if faltan:
-            n_altas = sum(sum(t.values()) for t in faltan.values())
-            pendientes.append(f"{n_altas} alta(s) sin precio en {len(faltan)} código(s)")
-        if pendientes:
-            print(f"\n✗ {MES} {ANIO}: " + " y ".join(pendientes) +
+            bloqueos.append(f"{len(multidia) + len(multitec)} duplicado(s) ambiguo(s)")
+        if sin_tarifa:
+            bloqueos.append(f"{n_sin_tarifa} alta(s) sin precio en "
+                            f"{len(sin_tarifa)} código(s)")
+        if bloqueos:
+            print(f"\n✗ {MES} {ANIO}: " + " y ".join(bloqueos) +
                   " sin resolver. Ver arriba.")
             sys.exit(2)
 
