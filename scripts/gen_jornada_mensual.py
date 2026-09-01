@@ -20,21 +20,36 @@ Uso:  gen_jornada_mensual.py --mes JULIO [--anio 2026] [--plantilla X] [--altas 
 """
 import argparse
 import calendar
+import os
+import sys
 from datetime import date, time
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from openpyxl import load_workbook
 from openpyxl.cell.cell import MergedCell
 
+from src import meses
 from src.reconciliation.extract import parse_date
 
-BASE = "/Users/samaro/Library/CloudStorage/GoogleDrive-salamanca118@gmail.com/Mi unidad/SECOMCOL/CONTABILIDAD"
-ALTAS_DIR = f"{BASE}/ALTAS POR TECNICO/2026"
-JORNADA_DIR = f"{BASE}/registro jornada/2026"
+BASE = os.environ.get(
+    "SECOMCOL_BASE",
+    "/Users/samaro/Library/CloudStorage/GoogleDrive-salamanca118@gmail.com/"
+    "Mi unidad/SECOMCOL",
+)
+CONTABILIDAD = f"{BASE}/CONTABILIDAD"
 
-MESES = {"ENERO": 1, "FEBRERO": 2, "MARZO": 3, "ABRIL": 4, "MAYO": 5, "JUNIO": 6,
-         "JULIO": 7, "AGOSTO": 8, "SEPTIEMBRE": 9, "OCTUBRE": 10,
-         "NOVIEMBRE": 11, "DICIEMBRE": 12}
-PREV = {v: k for k, v in MESES.items()}
+MESES = {nombre: i + 1 for i, nombre in enumerate(meses.MESES)}
+
+
+def altas_dir(anio: int) -> str:
+    return f"{CONTABILIDAD}/ALTAS POR TECNICO/{anio}"
+
+
+def jornada_dir(anio: int) -> str:
+    """Los registros se archivan por año; el de DICIEMBRE vive en la carpeta del año anterior."""
+    return f"{CONTABILIDAD}/registro jornada/{anio}"
 
 # hoja del registro -> (técnico en ALTAS, patrón)   None = dejar en blanco
 # La hoja de JAMES se llamaba ALVARO hasta que el usuario la renombró en junio;
@@ -139,9 +154,13 @@ def main():
     dias_mes = calendar.monthrange(anio, mes_num)[1]
     inicio, fin = date(anio, mes_num, 1), date(anio, mes_num, dias_mes)
 
-    altas_path = args.altas or f"{ALTAS_DIR}/ALTAS_{mes}_{anio}.xlsx"
-    out_path = args.out or f"{JORNADA_DIR}/REGISTRO_JORNADA_{mes}.xlsx"
-    template = args.plantilla or f"{JORNADA_DIR}/REGISTRO_JORNADA_{PREV[mes_num - 1]}.xlsx"
+    mes_prev_num, anio_prev = meses.anterior(mes_num, anio)
+    mes_prev = meses.nombre(mes_prev_num)
+
+    altas_path = args.altas or f"{altas_dir(anio)}/ALTAS_{mes}_{anio}.xlsx"
+    out_path = args.out or f"{jornada_dir(anio)}/REGISTRO_JORNADA_{mes}.xlsx"
+    # La plantilla es el registro del mes anterior — que en enero está en el año anterior.
+    template = args.plantilla or f"{jornada_dir(anio_prev)}/REGISTRO_JORNADA_{mes_prev}.xlsx"
 
     print(f"Mes:       {mes} {anio} ({dias_mes} días)")
     print(f"Altas:     {altas_path}")

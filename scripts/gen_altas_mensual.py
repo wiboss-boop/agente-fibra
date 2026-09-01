@@ -18,29 +18,34 @@ Reglas acordadas con el usuario:
   para poder retocarlo a mano. Sustituye al pie que antes se tecleaba en cada hoja.
 
 Uso:  gen_altas_mensual.py --mes JULIO [--anio 2026] [--sheet ID] [--out X] [--write]
+
+Con --strict el script termina con código 2 si quedan duplicados ambiguos sin resolver;
+es la puerta que usa scripts/cierre_mensual.py para no cerrar un mes a medias.
 """
 import argparse
+import os
 import re
 import sys
 from collections import defaultdict
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill
 
+from src import meses
 from src.reconciliation.extract import norm_order
 from src.sheets.auth import get_sheets_service
 
-# Sheet de origen por mes (el ID cambia cada mes; ver ACTIVE_SHEET_ID en Railway)
-SHEETS = {
-    ("JUNIO", 2026): "1JjUY08AJmICiPmc9xXDJEdqKFIv2rIln6AYYWUxzMwI",
-    ("JULIO", 2026): "1Suv1VbJ232NA7PtsUaxwA_-QwXquz8mRbcv3qvTXe6A",
-    ("AGOSTO", 2026): "1-GRoSJIK1X6dP6AyG0ax_lsfMcPqSjfM9oqwNdilbtc",
-}
-MESES = {"ENERO": 1, "FEBRERO": 2, "MARZO": 3, "ABRIL": 4, "MAYO": 5, "JUNIO": 6,
-         "JULIO": 7, "AGOSTO": 8, "SEPTIEMBRE": 9, "OCTUBRE": 10,
-         "NOVIEMBRE": 11, "DICIEMBRE": 12}
-OUT_DIR = ("/Users/samaro/Library/CloudStorage/GoogleDrive-salamanca118@gmail.com/"
-           "Mi unidad/SECOMCOL/CONTABILIDAD/ALTAS POR TECNICO/2026")
+# El Sheet de origen cambia cada mes; el ID lo anota crear_sheet_mensual.py en
+# config/sheets_mensuales.json (ver src/meses.py). --sheet lo sobreescribe.
+MESES = {nombre: i + 1 for i, nombre in enumerate(meses.MESES)}
+BASE = os.environ.get(
+    "SECOMCOL_BASE",
+    "/Users/samaro/Library/CloudStorage/GoogleDrive-salamanca118@gmail.com/"
+    "Mi unidad/SECOMCOL",
+)
 TECS = ["CRISTIAN", "MARTIN", "JAMES", "JEAN", "YOHAN", "ERCS",
         "HANS", "JOEL", "DIANA", "AYMAN", "LUIS E"]
 
@@ -194,7 +199,7 @@ def apply_resolutions(altas):
         if keep_day is not None and a["dia"] != keep_day:
             continue  # orden repetida en otro día -> se descarta
         if keep_day is not None and a["dia"] == keep_day:
-            a["nota"] = f"Orden única (registrada varias veces en el mes; se paga 1 vez)"
+            a["nota"] = "Orden única (registrada varias veces en el mes; se paga 1 vez)"
         if sig in NO_PAY:
             a["precio"] = 0
         if sig in NOTES:
@@ -245,9 +250,11 @@ def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--mes", required=True, help="mes en mayúsculas, p.ej. JULIO")
     ap.add_argument("--anio", type=int, default=2026)
-    ap.add_argument("--sheet", help="ID del Sheet origen (por defecto, el de SHEETS)")
+    ap.add_argument("--sheet", help="ID del Sheet origen (por defecto, el de config/sheets_mensuales.json)")
     ap.add_argument("--out", help="ruta del .xlsx (por defecto ALTAS_<MES>_<AÑO>.xlsx)")
     ap.add_argument("--write", action="store_true", help="guarda el .xlsx (si no, dry-run)")
+    ap.add_argument("--strict", action="store_true",
+                    help="salir con código 2 si hay duplicados ambiguos sin resolver")
     args = ap.parse_args()
 
     MES = args.mes.upper()
@@ -255,10 +262,11 @@ def main() -> None:
     if MES not in MESES:
         ap.error(f"mes desconocido: {MES}")
     MES_NUM = MESES[MES]
-    SID = args.sheet or SHEETS.get((MES, ANIO))
+    SID = args.sheet or meses.sheet_id(MES, ANIO)
     if not SID:
-        ap.error(f"no hay Sheet conocido para {MES} {ANIO}; pásalo con --sheet")
-    OUT = args.out or f"{OUT_DIR}/ALTAS_{MES}_{ANIO}.xlsx"
+        ap.error(f"no hay Sheet registrado para {MES} {ANIO} en {meses.REGISTRO}; "
+                 f"pásalo con --sheet")
+    OUT = args.out or f"{BASE}/CONTABILIDAD/ALTAS POR TECNICO/{ANIO}/ALTAS_{MES}_{ANIO}.xlsx"
 
     res = RESOLUCIONES.get((MES, ANIO), {})
     KEEP_ONE_DAY = res.get("keep_one_day", {})
@@ -341,6 +349,11 @@ def main() -> None:
         print(f"\n✅ Escrito: {OUT}")
     else:
         print("\n(dry-run — usa --write para guardar el .xlsx)")
+
+    if args.strict and (multidia or multitec):
+        print(f"\n✗ {len(multidia) + len(multitec)} duplicado(s) ambiguo(s) sin resolver "
+              f"para {MES} {ANIO}: añádelos a RESOLUCIONES antes de cerrar el mes.")
+        sys.exit(2)
 
 
 if __name__ == "__main__":

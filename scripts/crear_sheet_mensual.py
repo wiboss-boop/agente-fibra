@@ -10,9 +10,13 @@
 - Se crea con la cuenta humana (salamanca118) y se da acceso de editor al SERVICE ACCOUNT
   (misma identidad con la que el agente escribe en prod).
 
-Uso:
-    crear_sheet_mensual.py --mes AGOSTO_2026 --source <id-o-url-del-mes-anterior> [--write]
+- Al crear el mes, el ID queda anotado en config/sheets_mensuales.json (lo leen los
+  generadores del cierre; antes había que copiarlo a mano al dict SHEETS).
 
+Uso:
+    crear_sheet_mensual.py --mes SEPTIEMBRE_2026 [--source <id-o-url-del-mes-anterior>] [--write]
+
+Sin --source se toma el Sheet del mes anterior del registro.
 Sin --write es dry-run: no crea nada, solo imprime el plan de pestañas.
 """
 import argparse
@@ -22,11 +26,17 @@ import re
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
 from googleapiclient.discovery import build
 
-SA_FILE = "/Users/samaro/Documents/secomcol-bot/secomcol-bot-54966487a09b.json"
+from src import meses
+
 # El agente en prod escribe con el service account -> hay que darle acceso de editor.
-SA_EMAIL = json.load(open(SA_FILE))["client_email"]
+SA_FILE = os.environ.get(
+    "SECOMCOL_SA_FILE",
+    "/Users/samaro/Documents/secomcol-bot/secomcol-bot-54966487a09b.json",
+)
 SCOPES = ["https://www.googleapis.com/auth/spreadsheets",
           "https://www.googleapis.com/auth/drive"]
 OAUTH_CLIENT = "config/google_oauth_credentials.json"
@@ -45,6 +55,16 @@ ORDEN = ["Base"] + TECNICOS + ["Hoja6", "Descuentos"]
 # En las hojas que escribe el bot de alarmas (JEAN/JOEL/DIANA/MARTIN) el bot pisa la
 # fórmula con el valor resuelto al escribir cada fila — mismo comportamiento que julio.
 FORMULA_LAST_ROW = 500
+
+
+def _sa_email():
+    """Email del service account del agente. Se lee tarde: sin el JSON el script
+    seguía sirviendo para el dry-run, pero antes reventaba al importarlo."""
+    try:
+        return json.loads(Path(SA_FILE).read_text())["client_email"]
+    except (OSError, KeyError, json.JSONDecodeError) as exc:
+        sys.exit(f"No se pudo leer el service account en {SA_FILE}: {exc}\n"
+                 "Ajusta la ruta con SECOMCOL_SA_FILE=/ruta/al/service_account.json")
 
 
 def _creds():
@@ -82,16 +102,32 @@ def _sheet_id(valor):
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--mes", required=True,
-                    help="título del sheet nuevo, p.ej. AGOSTO_2026")
-    ap.add_argument("--source", required=True,
-                    help="ID o URL del sheet del mes anterior (origen de la estructura)")
+                    help="título del sheet nuevo, p.ej. SEPTIEMBRE_2026")
+    ap.add_argument("--source",
+                    help="ID o URL del sheet del mes anterior (origen de la estructura); "
+                         "por defecto, el del mes anterior en config/sheets_mensuales.json")
     ap.add_argument("--write", action="store_true",
                     help="crea el sheet de verdad (sin este flag es dry-run)")
     args = ap.parse_args()
 
     write = args.write
     NUEVO_TITULO = args.mes
-    SOURCE_ID = _sheet_id(args.source)
+    # El título manda: de él salen el mes y el año con los que se anota el ID en el
+    # registro y con los que se busca el origen. Si no es MES_AÑO, se exige --source.
+    destino = meses.parse_titulo(NUEVO_TITULO)
+
+    if args.source:
+        SOURCE_ID = _sheet_id(args.source)
+    else:
+        if not destino:
+            ap.error(f"--mes '{NUEVO_TITULO}' no es MES_AÑO: pasa el origen con --source")
+        mes_prev, anio_prev = meses.anterior(meses.numero(destino[0]), destino[1])
+        SOURCE_ID = meses.sheet_id(meses.nombre(mes_prev), anio_prev)
+        if not SOURCE_ID:
+            ap.error(f"no hay Sheet registrado para {meses.nombre(mes_prev)} {anio_prev} "
+                     f"en {meses.REGISTRO}; pásalo con --source")
+        print(f"Origen tomado del registro: {meses.nombre(mes_prev)} {anio_prev}")
+
     creds = _creds()
     sheets = build("sheets", "v4", credentials=creds)
     drive = build("drive", "v3", credentials=creds)
@@ -123,6 +159,10 @@ def main():
     if not write:
         print("\n(dry-run — usa --write para crear el sheet)")
         return
+
+    # Antes de crear nada: si falta el JSON del service account, el sheet nuevo se
+    # quedaría creado y sin acceso para el agente. Mejor reventar aquí.
+    sa_email = _sa_email()
 
     # leer valores del origen según el modo
     def leer(tab, modo):
@@ -186,14 +226,21 @@ def main():
     # dar acceso de editor al service account (el agente en prod escribe con él)
     drive.permissions().create(
         fileId=nuevo_id,
-        body={"type": "user", "role": "writer", "emailAddress": SA_EMAIL},
+        body={"type": "user", "role": "writer", "emailAddress": sa_email},
         sendNotificationEmail=False,
     ).execute()
+
+    # anotar el ID en el registro que leen los generadores del cierre
+    if destino:
+        meses.registrar_sheet(destino[0], destino[1], nuevo_id)
+        print(f"   Registrado en {meses.REGISTRO} como {destino[0]} {destino[1]}")
+    else:
+        print(f"   ⚠ '{NUEVO_TITULO}' no es MES_AÑO: anota el ID a mano en {meses.REGISTRO}")
 
     print(f"\n✅ Creado: {NUEVO_TITULO} (propietario: salamanca118)")
     print(f"   ID:  {nuevo_id}")
     print(f"   URL: https://docs.google.com/spreadsheets/d/{nuevo_id}")
-    print(f"   Editor: {SA_EMAIL} (service account del agente)")
+    print(f"   Editor: {sa_email} (service account del agente)")
     print("\n⚠ Faltan las DOS variables de Railway (en agosto-2026 solo se cambió")
     print("  la primera y las alarmas escribieron todo el mes en el sheet viejo):")
     print(f"    railway variables -s agente-fibra --set \"ACTIVE_SHEET_ID={nuevo_id}\"")
