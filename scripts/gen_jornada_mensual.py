@@ -66,6 +66,7 @@ MAPEO = {
     "DIANA":      ("DIANA",    "FULL"),
     "DIEGO":      (None,       "FULL"),   # ya no trabaja; hoja en blanco
     "AYMAN":      ("AYMAN",    "PART"),
+    "LUIS E":     ("LUIS E",   "FULL"),
 }
 ALIAS_HOJA = {"JAMES": "ALVARO"}   # nombre alternativo si la plantilla es antigua
 
@@ -171,9 +172,15 @@ def main():
     wb = load_workbook(template)
 
     resumen = []
+    sin_hoja = []
+    escritas = set()
     for hoja, (tecnico, patron) in MAPEO.items():
         if hoja not in wb.sheetnames and ALIAS_HOJA.get(hoja) in wb.sheetnames:
             hoja = ALIAS_HOJA[hoja]      # plantilla antigua: JAMES aún se llama ALVARO
+        if hoja not in wb.sheetnames:
+            sin_hoja.append(hoja)
+            continue
+        escritas.add(hoja)
         ws = wb[hoja]
         fila1, fila_total, fila_periodo, fila_recibido = localizar(ws)
 
@@ -222,6 +229,19 @@ def main():
         etiqueta = hoja if (tecnico is None or tecnico == hoja) else f"{hoja}→{tecnico}"
         resumen.append((etiqueta, patron, len(trabajados), fila_periodo is not None, trabajados))
 
+    if sin_hoja:
+        # Sin hoja no hay jornada registrada, y el registro es un documento laboral:
+        # mejor no escribir nada que escribirlo incompleto sin que se note.
+        sys.exit(
+            f"\n✗ La plantilla no tiene hoja para: {', '.join(sin_hoja)}\n"
+            f"  {template}\n"
+            "  Duplica en esa plantilla la hoja de un compañero con el mismo patrón,\n"
+            "  renómbrala y cambia el nombre del trabajador en su encabezado; luego repite.")
+
+    # Una hoja que no está en MAPEO no se limpia ni se rellena: se queda tal cual venía
+    # de la plantilla, o sea con las horas del mes anterior dentro del archivo nuevo.
+    sin_mapear = [t for t in wb.sheetnames if t not in escritas]
+
     wb.save(out_path)
 
     print("\nHoja             patrón  días  periodo?  (días)")
@@ -229,6 +249,8 @@ def main():
         print(f"  {etiqueta:16} {patron:5} {n:4}   {'sí' if tiene_periodo else 'NO':7} {dd}")
     faltan = {t for t, d in dias.items() if d} - {t for t, _ in MAPEO.values() if t}
     print("\nTécnicos con altas SIN hoja en el registro:", sorted(faltan) or "ninguno")
+    if sin_mapear:
+        print(f"⚠ Hojas fuera del MAPEO — CONSERVAN las horas de {mes_prev}: {sin_mapear}")
     print(f"\n✅ Escrito: {out_path}")
 
 
