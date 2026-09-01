@@ -52,6 +52,13 @@ En agosto-2026 solo se cambió la primera y las alarmas escribieron todo el mes 
 de julio. Por eso el paso 2 vuelve a leer las variables después de escribirlas y aborta si
 alguna no apunta al Sheet nuevo.
 
+La comprobación usa `railway variables --json` y compara variable a variable. **No imprime
+la salida**: la tabla de `railway variables` incluye `ANTHROPIC_API_KEY`, `RAILWAY_TOKEN`,
+`TELEGRAM_TOKEN`, la clave privada del service account y las contraseñas de los técnicos
+dentro de `CREDENTIALS_YAML`; no tienen por qué acabar en el scrollback. Si la CLI no
+soporta `--json`, cae a buscar el ID en el texto, que la tabla parte en varias líneas
+dentro del marco — por eso se aplana antes de comparar.
+
 ## Duplicados ambiguos
 
 Una orden no puede pagarse dos veces. Los duplicados del mismo día se colapsan solos, pero
