@@ -169,11 +169,15 @@ def paso_3_altas(ctx, write):
     proc = _run(base + ["--strict"], check=False)
     if proc.returncode == 2:
         sys.exit(
-            f"\n✗ Hay duplicados ambiguos en {ctx['mes_cerrado']}: una orden no puede "
-            "pagarse dos veces.\n"
-            "  Decide cada caso y añádelo a RESOLUCIONES en scripts/gen_altas_mensual.py\n"
-            f"  con la clave (\"{ctx['mes_cerrado']}\", {ctx['anio_cerrado']}); luego repite:\n"
-            f"      {Path(__file__).name} --paso 3 --write")
+            f"\n✗ La revisión de {ctx['mes_cerrado']} deja algo sin decidir (ver arriba). "
+            "Nada de esto se resuelve solo:\n"
+            "  · duplicado ambiguo → la misma orden no puede pagarse dos veces: elige "
+            "dónde se paga y\n"
+            "    añádela a RESOLUCIONES en scripts/gen_altas_mensual.py con la clave "
+            f"(\"{ctx['mes_cerrado']}\", {ctx['anio_cerrado']}).\n"
+            "  · código sin precio → esa alta saldría en blanco: añade el precio al "
+            "técnico en PRECIO_TECNICO.\n"
+            f"  Luego repite:  {Path(__file__).name} --paso 3 --write")
     if proc.returncode != 0:
         sys.exit(f"\n✗ Falló la revisión de altas (código {proc.returncode})")
     _run(base + ["--write"])

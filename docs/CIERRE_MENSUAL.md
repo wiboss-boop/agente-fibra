@@ -59,18 +59,22 @@ dentro de `CREDENTIALS_YAML`; no tienen por qué acabar en el scrollback. Si la 
 soporta `--json`, cae a buscar el ID en el texto, que la tabla parte en varias líneas
 dentro del marco — por eso se aplana antes de comparar.
 
-## Duplicados ambiguos
+## Lo que para el cierre
 
-Una orden no puede pagarse dos veces. Los duplicados del mismo día se colapsan solos, pero
-la misma orden en **dos días** o en **dos técnicos** la decide el usuario mes a mes.
+El paso 3 corre primero `gen_altas_mensual.py --strict` (código de salida 2) y no escribe
+nada si queda algo por decidir. Son dos cosas, y ninguna se resuelve sola porque las dos
+descuadran la nómina:
 
-El paso 3 corre primero `gen_altas_mensual.py --strict` (código de salida 2 si quedan
-ambiguos) y para el cierre. Cuando eso pasa:
+**Duplicado ambiguo.** Una orden no puede pagarse dos veces. Los duplicados del mismo día
+se colapsan solos, pero la misma orden en **dos días** o en **dos técnicos** la decides tú.
+Añade la decisión a `RESOLUCIONES` con la clave `("MES", AÑO)` — **nunca** heredar las de
+otro mes.
 
-1. Mirar el listado que imprime bajo `⚠ REVISAR`.
-2. Añadir la decisión a `RESOLUCIONES` en `scripts/gen_altas_mensual.py`, con la clave
-   `("MES", AÑO)` — **nunca** heredar las de otro mes: descuadraría la nómina.
-3. Repetir: `scripts/cierre_mensual.py --paso 3 --write`.
+**Código sin precio.** El alta saldría con el importe en blanco, o sea sin pagar. Suele ser
+un código nuevo del contratista; añádelo a `PRECIO_TECNICO` con el precio al técnico.
+
+En los dos casos el listado sale bajo `⚠ REVISAR`, con el código y el reparto por técnico.
+Después: `scripts/cierre_mensual.py --paso 3 --write`.
 
 ## Registro de Sheets
 
