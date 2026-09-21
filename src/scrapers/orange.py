@@ -10,6 +10,7 @@ Usa el mismo motor que Kairos (mismos selectores de login y estructura de URLs):
 
 import logging
 import re
+import unicodedata
 from datetime import date
 from pathlib import Path
 from typing import List, Optional, Tuple
@@ -274,23 +275,36 @@ def _skip_reason(order_id: str, html: str) -> Optional[str]:
 # Descarga de PDF por orden
 # ---------------------------------------------------------------------------
 
+def _sin_tildes(txt: str) -> str:
+    """minúsculas y sin acentos: Orange escribe los links con y sin tilde."""
+    return "".join(
+        c for c in unicodedata.normalize("NFD", txt.lower())
+        if unicodedata.category(c) != "Mn"
+    )
+
+
 # Detecta cualquier boletín/cierre exitoso: "boletín ... ok" o "cierre ... ok"
 def _is_boletin_ok(txt: str) -> bool:
-    t = txt.lower()
-    if "reutilización de la acometida" in t:
+    t = _sin_tildes(txt)
+    # En instalaciones, el link «Reutilización de la acometida» es el ÚNICO documento
+    # que dice si la acometida es nueva o reutilizada: el Boletín digital de
+    # Instalación no lo trae, así que es ese el que hay que descargar.
+    if "reutiliz" in t and "acometida" in t:
         return True
     # Posventa OK = avería resuelta (no tiene PDF de reutilización)
-    if ("boletín digital posventa" in t) or ("cierre de incidencia ok" in t) or ("cierre ok" in t) or ("boletín digital avería ok" in t) or ("boletin digital averia ok" in t):
+    if ("boletin digital posventa" in t) or ("cierre de incidencia ok" in t) or ("cierre ok" in t) or ("boletin digital averia ok" in t):
         return True
     return False
 
 
 def _find_boletin_ok_index(page: Page, order_id: str) -> "Tuple[Optional[int], int]":
     """
-    Busca el botón llamado 'Boletín digital de Instalación OK' entre los documentos.
+    Busca entre los documentos el que hay que descargar: en instalaciones el link
+    «Reutilización de la acometida»; en averías, el boletín/cierre cerrado en OK.
     Devuelve (indice, n_total).
     - Si no hay documentos: (None, 0)   → sin partes, no es incidencia gestionable
-    - Si hay documentos pero ninguno es el boletín OK: (None, n>0) → registrar como incidencia
+    - Si hay documentos pero ninguno sirve: (None, n>0) → registrar como incidencia
+      (sin el PDF de reutilización no se puede saber si la acometida es nueva)
     - Si se encuentra: (indice, n_total)
     """
     # Buscar por data-orden (nuevo formato Orange) o por id^=instalacion_ (formato antiguo)
