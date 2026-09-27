@@ -250,22 +250,30 @@ def _extract_order_ids_from_page(page: Page) -> List[str]:
     return filtered
 
 
+# Estados que significan que la orden NO se hizo. Kairos los escribe en español
+# («Anulada») y Polar en inglés («Canceled»): se buscan raíces que cubran los dos.
+_ESTADOS_CANCELADOS = ("anulad", "cancel")
+
+
 def _skip_reason(order_id: str, html: str) -> Optional[str]:
     """Devuelve el motivo de exclusión o None si la orden debe procesarse."""
     if "AGILETV" in order_id.upper() or "AGILE_TV" in order_id.upper():
         return "servicio AgileTV"
 
-    # Buscar solo el texto del <a> que apunta a esta orden
+    # Buscar solo el <a> que apunta a esta orden, con el id completo: si no,
+    # MYSIM_123 casa con el enlace de MYSIM_123_AGILETV y se lee el estado de otra
     m = re.search(
-        rf'<a[^>]*codigoOt={re.escape(order_id)}[^>]*>(.*?)</a>',
+        rf'<a[^>]*codigoOt={re.escape(order_id)}["\'&][^>]*>(.*?)</a>',
         html,
         re.DOTALL | re.IGNORECASE,
     )
     if m:
-        link_text = m.group(1).lower()
-        for status in ("anulada", "anulado", "cancelada", "cancelado"):
-            if status in link_text:
-                return f"estado {status}"
+        # El estado va en su propia etiqueta; el resto del enlace es el nombre y la
+        # dirección del cliente, que no deben decidir nada
+        e = re.search(r'class="estadoOt[^"]*"[^>]*>([^<]*)<', m.group(1))
+        texto = e.group(1).strip() if e else m.group(1)
+        if any(s in texto.lower() for s in _ESTADOS_CANCELADOS):
+            return f"estado {texto}" if e else "estado anulada/cancelada"
 
     return None
 
