@@ -189,6 +189,68 @@ def _extract_meters(text: str) -> Optional[float]:
 
 
 # ---------------------------------------------------------------------------
+# Orange: PDF "Datos acometida" (link «Reutilización de la acometida»)
+# ---------------------------------------------------------------------------
+
+def _reutiliza_acometida(text: str) -> Optional[bool]:
+    """
+    ¿La acometida es reutilizada? Lee los dos campos del PDF "Datos acometida":
+      - "--Reutiliza Acometida: SI|NO"        (bandera de la plataforma)
+      - "¿La acometida es reutilizada?: • SI" (respuesta del técnico)
+    Devuelve True/False, o None si no hay respuesta o si las dos se contradicen
+    (ese caso va a incidencia: no se tarifa a ciegas).
+    """
+    def _si_no(match) -> Optional[bool]:
+        if not match:
+            return None
+        return match.group(1).upper().startswith("S")
+
+    bandera = _si_no(re.search(
+        r'--\s*Reutiliza\s+Acometida\s*:[ \t]*(S[IÍ]|NO)\b', text, re.IGNORECASE))
+    respuesta = _si_no(re.search(
+        r'¿\s*La\s+acometida\s+es\s+reutilizada\s*\?\s*:\s*\n?\s*[•\-–]?\s*(S[IÍ]|NO)\b',
+        text, re.IGNORECASE))
+
+    if bandera is not None and respuesta is not None and bandera != respuesta:
+        logger.warning("Datos acometida: '--Reutiliza Acometida'=%s contradice la respuesta "
+                       "del técnico=%s — se marca incidencia", bandera, respuesta)
+        return None
+    return bandera if bandera is not None else respuesta
+
+
+def _metros_componente(text: str) -> Optional[float]:
+    """
+    Longitud de la acometida instalada, leída de "Modelo del componente".
+    Variantes vistas en producción:
+        ACOMETIDA EXTERIOR 030M PRODIGY ETIQ   → 30
+        ACOM. EXTERIOR 40M PRODIGY ETIQ        → 40
+        ACOMETIDA EXTERIOR OPTITAP 040M        → 40
+        ACOMETIDA INTERIOR 030M 3MM            → 30   (3MM es el diámetro)
+        ACOMETIDA EXTERIOR 3M 030M ETIQ        → 30   (el 3M es el diámetro, y va DELANTE)
+        ACOMETIDA BLANCA EXT. OPTITAP 030      → 30   (sin unidad, cierra el modelo)
+    Dentro de una línea manda el número más grande: el diámetro siempre es menor que
+    la longitud, y puede ir antes o después de ella. Con varios componentes, el más
+    largo. None si no hay longitud legible.
+    """
+    candidatos = []
+    for linea in re.findall(r'Modelo del componente\s*:\s*([^\n]+)', text, re.IGNORECASE):
+        linea = linea.strip()
+        # "030M" / "40 M": la M de metros va sola; "3MM" (diámetro) no casa por el \b
+        medidas = [float(x) for x in re.findall(r'\b(\d{1,3})\s*M\b', linea, re.IGNORECASE)]
+        if not medidas:
+            # Modelo que termina en la longitud sin unidad: "... OPTITAP 030"
+            m = re.search(r'\b(\d{2,3})\s*$', linea)
+            if m:
+                medidas = [float(m.group(1))]
+        medidas = [x for x in medidas if 1 <= x <= 500]
+        if medidas:
+            candidatos.append(max(medidas))
+        else:
+            logger.debug("Sin longitud legible en 'Modelo del componente': %s", linea)
+    return max(candidatos) if candidatos else None
+
+
+# ---------------------------------------------------------------------------
 # Determinación del código según tipo de PDF
 # ---------------------------------------------------------------------------
 
@@ -297,16 +359,22 @@ def _codigo_orange(text: str) -> Tuple[Optional[str], bool]:
     # sin este mapeo caía al fallback y se apuntaba como MM17 (reutilizada)
     if re.search(r'bolet[ií]n\s+digital\s+aver[ií]a', text, re.IGNORECASE):
         return "AVERIA OK", False
-    # PDF de reutilización: usar --Reutiliza Acometida
+    # PDF "Datos acometida" (link «Reutilización de la acometida»): es el ÚNICO
+    # documento de Orange que dice si la acometida es nueva o reutilizada.
     if "datos acometida" in text.lower():
-        if re.search(r'--Reutiliza Acometida:\s*SI', text, re.IGNORECASE):
+        reutiliza = _reutiliza_acometida(text)
+        if reutiliza is None:
+            logger.debug("Datos acometida sin respuesta clara de reutilización — incidencia")
+            return None, True
+        if reutiliza:
             return "MM17", False
-        # Acometida nueva: buscar metros en Modelo del componente
-        m = re.search(r'ACOMETIDA EXTERIOR\s+(\d+)M', text, re.IGNORECASE)
-        if m:
-            meters = float(m.group(1))
-            return _meters_to_code(meters), False
-        return "MM17", False
+        # Acometida nueva: la longitud vive en "Modelo del componente".
+        metros = _metros_componente(text)
+        if metros is None:
+            # Nunca tarifar una acometida NUEVA como MM17 por no encontrar los metros.
+            logger.debug("Acometida nueva sin longitud en 'Modelo del componente' — incidencia")
+            return None, True
+        return _meters_to_code(metros), False
     meters = _extract_meters(text)
     if meters is not None:
         return _meters_to_code(meters), False
@@ -524,14 +592,17 @@ def _run_tests():
     # ------------------------------------------------------------------
     print("\n=== Código Orange ===")
 
-    texto_orange_mm17 = textwrap.dedent("""\
+    texto_orange_sin_datos = textwrap.dedent("""\
         Boletín digital Instalación
         Código: OB-20260425-001
         Fecha: 25/04/2026
         Técnico: Z2252
         Instalación completada sin acometida nueva.
     """)
-    check("Sin acometida/metros → MM17", _codigo_orange(texto_orange_mm17), ("MM17", False))
+    # El Boletín de Instalación NO dice si la acometida es nueva o reutilizada:
+    # sin el PDF de «Reutilización de la acometida» esto es incidencia, no MM17.
+    check("Boletín Instalación suelto → incidencia",
+          _codigo_orange(texto_orange_sin_datos), (None, True))
 
     texto_orange_mm02 = textwrap.dedent("""\
         Boletín digital Instalación
@@ -550,7 +621,90 @@ def _run_tests():
         Boletín digital Instalación
         Se realizó acometida pero no se especifica longitud.
     """)
-    check("acometida sin metros → MM17", _codigo_orange(texto_orange_acometida_sin_metros), ("MM17", False))
+    check("acometida sin metros → incidencia",
+          _codigo_orange(texto_orange_acometida_sin_metros), (None, True))
+
+    # ------------------------------------------------------------------
+    # 7b. Orange "Datos acometida" — el link «Reutilización de la acometida»
+    # ------------------------------------------------------------------
+    print("\n=== Orange: Datos acometida (reutilización) ===")
+
+    def _datos_acometida(reutiliza: str, extra: str = "") -> str:
+        return textwrap.dedent(f"""\
+            Datos acometida
+            Nombre del técnico: JAMES
+            Identificador OT: 1114889808
+            Fecha y hora: 28/05/2026 10:56
+            --TipoOT: Alta Numeración Nueva --TipoCliente: Residencial
+            --Reutiliza Acometida: {reutiliza} --Necesita Reutilizar: --Alta Portabilidad:
+            ¿La acometida es reutilizada?:
+            • {reutiliza}
+            {extra}
+        """)
+
+    check("reutilizada → MM17",
+          _codigo_orange(_datos_acometida("SI")), ("MM17", False))
+
+    check("nueva sin longitud → incidencia (nunca MM17)",
+          _codigo_orange(_datos_acometida("NO")), (None, True))
+
+    check("ACOMETIDA EXTERIOR 030M PRODIGY ETIQ → MM02",
+          _codigo_orange(_datos_acometida(
+              "NO", "Modelo del componente: ACOMETIDA EXTERIOR 030M PRODIGY ETIQ")),
+          ("MM02", False))
+
+    check("ACOM. EXTERIOR 40M PRODIGY ETIQ → MM04",
+          _codigo_orange(_datos_acometida(
+              "NO", "Modelo del componente: ACOM. EXTERIOR 40M PRODIGY ETIQ")),
+          ("MM04", False))
+
+    check("ACOMETIDA EXTERIOR OPTITAP 040M → MM04",
+          _codigo_orange(_datos_acometida(
+              "NO", "Modelo del componente: ACOMETIDA EXTERIOR OPTITAP 040M")),
+          ("MM04", False))
+
+    check("ACOMETIDA BLANCA EXT. OPTITAP 030 → MM02",
+          _codigo_orange(_datos_acometida(
+              "NO", "Modelo del componente: ACOMETIDA BLANCA EXT. OPTITAP 030")),
+          ("MM02", False))
+
+    check("ACOMETIDA EXTERIOR 3M 030M ETIQ → MM02 (el 3M es el diámetro, va delante)",
+          _codigo_orange(_datos_acometida(
+              "NO", "Modelo del componente: ACOMETIDA EXTERIOR 3M 030M ETIQ")),
+          ("MM02", False))
+
+    check("ACOMETIDA INTERIOR 040M 3MM ETIQ → MM04",
+          _codigo_orange(_datos_acometida(
+              "NO", "Modelo del componente: ACOMETIDA INTERIOR 040M 3MM ETIQ")),
+          ("MM04", False))
+
+    check("ACOMETIDA INTERIOR 030M 3MM → MM02 (3MM es el diámetro)",
+          _codigo_orange(_datos_acometida(
+              "NO", "Modelo del componente: ACOMETIDA INTERIOR 030M 3MM")),
+          ("MM02", False))
+
+    check("ACOMETIDA EXTERIOR 080M → MM06",
+          _codigo_orange(_datos_acometida(
+              "NO", "Modelo del componente: ACOMETIDA EXTERIOR 080M PRODIGY ETIQ")),
+          ("MM06", False))
+
+    texto_contradictorio = textwrap.dedent("""\
+        Datos acometida
+        --Reutiliza Acometida: SI --Necesita Reutilizar:
+        ¿La acometida es reutilizada?:
+        • NO
+        Modelo del componente: ACOMETIDA EXTERIOR 030M PRODIGY ETIQ
+    """)
+    check("bandera y técnico se contradicen → incidencia",
+          _codigo_orange(texto_contradictorio), (None, True))
+
+    texto_sin_respuesta = textwrap.dedent("""\
+        Datos acometida
+        Identificador OT: 9077414
+        --Reutiliza Acometida: --Necesita Reutilizar: --Alta Portabilidad:
+    """)
+    check("sin respuesta de reutilización → incidencia",
+          _codigo_orange(texto_sin_respuesta), (None, True))
 
     # ------------------------------------------------------------------
     # 7. Extracción de fecha y orden
