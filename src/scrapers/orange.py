@@ -84,8 +84,22 @@ def _process_technician(
         _login(page, tech["orange_user"], tech["orange_pass"])
         order_ids = _get_order_ids(page, target_date)
         logger.info("Orange / %s: %d órdenes encontradas", name, len(order_ids))
+        dashboard = page.content()
 
         for order_id in order_ids:
+            estado = _estado_orden(order_id, dashboard)
+            if _sin_cerrar(estado):
+                logger.warning("Orden %s sin cerrar en el portal (estado «%s») — incidencia",
+                               order_id, estado)
+                incidencias.append({
+                    "orden": order_id,
+                    "fecha": target_date.strftime("%d/%m/%Y"),
+                    "tecnico": name,
+                    "codigo": None,
+                    "incidencia": True,
+                    "_source": f"{order_id}_sin_cerrar",
+                })
+                continue
             pdf_path = downloads_dir / f"{order_id}_{name}.pdf"
             if pdf_path.exists():
                 logger.info("Ya existe, omitido: %s", pdf_path.name)
@@ -250,9 +264,36 @@ def _extract_order_ids_from_page(page: Page) -> List[str]:
     return filtered
 
 
-# Estados que significan que la orden NO se hizo. Kairos los escribe en español
-# («Anulada») y Polar en inglés («Canceled»): se buscan raíces que cubran los dos.
+# Estados de la etiqueta de la orden en el dashboard. Kairos los escribe en español
+# («Anulada», «Fin») y Polar en inglés o en mayúsculas («Canceled», «REALIZADO»).
+# Cancelada → no se hizo y se omite (por raíz, para cubrir los dos idiomas).
+# Cerrada   → se descarga su parte.
+# Cualquier otro («Instalado», «Ticketing», «Inicio»…) es una orden sin cerrar: va a
+# incidencia, porque el formulario de reutilización existe aunque no se instale.
 _ESTADOS_CANCELADOS = ("anulad", "cancel")
+_ESTADOS_CERRADOS = ("realizado", "fin")
+
+
+def _estado_orden(order_id: str, html: str) -> Optional[str]:
+    """Texto de la etiqueta de estado de la orden en el dashboard, o None si no está."""
+    # El <a> de esta orden con el id completo: si no, MYSIM_123 casa con el enlace
+    # de MYSIM_123_AGILETV y se lee el estado de otra
+    m = re.search(
+        rf'<a[^>]*codigoOt={re.escape(order_id)}["\'&][^>]*>(.*?)</a>',
+        html,
+        re.DOTALL | re.IGNORECASE,
+    )
+    if not m:
+        return None
+    # El estado va en su propia etiqueta; el resto del enlace es el nombre y la
+    # dirección del cliente, que no deben decidir nada
+    e = re.search(r'class="estadoOt[^"]*"[^>]*>([^<]*)<', m.group(1))
+    return e.group(1).strip() if e else None
+
+
+def _sin_cerrar(estado: Optional[str]) -> bool:
+    """True si el portal muestra la orden a medias. Sin etiqueta no se sabe: False."""
+    return estado is not None and estado.lower() not in _ESTADOS_CERRADOS
 
 
 def _skip_reason(order_id: str, html: str) -> Optional[str]:
@@ -260,20 +301,11 @@ def _skip_reason(order_id: str, html: str) -> Optional[str]:
     if "AGILETV" in order_id.upper() or "AGILE_TV" in order_id.upper():
         return "servicio AgileTV"
 
-    # Buscar solo el <a> que apunta a esta orden, con el id completo: si no,
-    # MYSIM_123 casa con el enlace de MYSIM_123_AGILETV y se lee el estado de otra
-    m = re.search(
-        rf'<a[^>]*codigoOt={re.escape(order_id)}["\'&][^>]*>(.*?)</a>',
-        html,
-        re.DOTALL | re.IGNORECASE,
-    )
-    if m:
-        # El estado va en su propia etiqueta; el resto del enlace es el nombre y la
-        # dirección del cliente, que no deben decidir nada
-        e = re.search(r'class="estadoOt[^"]*"[^>]*>([^<]*)<', m.group(1))
-        texto = e.group(1).strip() if e else m.group(1)
-        if any(s in texto.lower() for s in _ESTADOS_CANCELADOS):
-            return f"estado {texto}" if e else "estado anulada/cancelada"
+    estado = _estado_orden(order_id, html)
+    if estado and any(s in estado.lower() for s in _ESTADOS_CANCELADOS):
+        return f"estado {estado}"
+    if estado is None:
+        logger.warning("Orden %s: sin etiqueta de estado en el dashboard", order_id)
 
     return None
 
