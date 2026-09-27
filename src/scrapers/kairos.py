@@ -84,8 +84,22 @@ def _process_technician(browser, tech: dict, target_date: date, downloads_dir: P
             return downloaded, sin_parte
 
         logger.info("Kairos / %s: %d órdenes encontradas", name, len(order_ids))
+        dashboard = page.content()
 
         for order_id in order_ids:
+            estado = _estado_orden(order_id, dashboard)
+            if _sin_cerrar(estado):
+                logger.warning("Orden %s sin cerrar en el portal (estado «%s») — incidencia",
+                               order_id, estado)
+                sin_parte.append({
+                    "orden": order_id,
+                    "fecha": target_date.strftime("%d/%m/%Y"),
+                    "tecnico": name,
+                    "codigo": None,
+                    "incidencia": True,
+                    "_source": f"{order_id}_sin_cerrar",
+                })
+                continue
             pdf_path = downloads_dir / f"{order_id}.pdf"
             if pdf_path.exists():
                 logger.info("Ya existe, omitido: %s", pdf_path.name)
@@ -235,24 +249,9 @@ def _extract_order_ids_from_page(page: Page) -> List[str]:
     return filtered
 
 
-def _skip_reason(order_id: str, html: str) -> Optional[str]:
-    """Devuelve el motivo de exclusión o None si la orden debe procesarse."""
-    if "AGILETV" in order_id.upper() or "AGILE_TV" in order_id.upper():
-        return "servicio AgileTV"
-
-    # Buscar solo el texto del <a> que apunta a esta orden
-    m = re.search(
-        rf'<a[^>]*codigoOt={re.escape(order_id)}[^>]*>(.*?)</a>',
-        html,
-        re.DOTALL | re.IGNORECASE,
-    )
-    if m:
-        link_text = m.group(1).lower()
-        for status in ("anulada", "anulado", "cancelada", "cancelado"):
-            if status in link_text:
-                return f"estado {status}"
-
-    return None
+# Mismo motor que Polar y misma etiqueta de estado: los estados viven en un solo
+# sitio para que las dos plataformas no se desalineen
+from src.scrapers.orange import _estado_orden, _sin_cerrar, _skip_reason  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
