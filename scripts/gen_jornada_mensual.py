@@ -15,12 +15,14 @@
   del calendario los días que sobraban. Al pasar de un mes de 30 días a uno de 31 hay que
   RESTAURAR el día 31 en la col A (la fila sigue existiendo y la fórmula del total ya la
   cubre); si no, ese día no se registra.
+- No escribe encima de un registro que ya exista: después de generarlo se retoca a mano
+  (vacaciones…) y regenerarlo se lo llevaría por delante. Para rehacerlo, --force.
 
 Uso:  gen_jornada_mensual.py --mes JULIO [--anio 2026] [--plantilla X] [--altas Y] [--out Z]
+                             [--force]
 """
 import argparse
 import calendar
-import os
 import sys
 from datetime import date, time
 from pathlib import Path
@@ -33,23 +35,7 @@ from openpyxl.cell.cell import MergedCell
 from src import meses
 from src.reconciliation.extract import parse_date
 
-BASE = os.environ.get(
-    "SECOMCOL_BASE",
-    "/Users/samaro/Library/CloudStorage/GoogleDrive-salamanca118@gmail.com/"
-    "Mi unidad/SECOMCOL",
-)
-CONTABILIDAD = f"{BASE}/CONTABILIDAD"
-
 MESES = {nombre: i + 1 for i, nombre in enumerate(meses.MESES)}
-
-
-def altas_dir(anio: int) -> str:
-    return f"{CONTABILIDAD}/ALTAS POR TECNICO/{anio}"
-
-
-def jornada_dir(anio: int) -> str:
-    """Los registros se archivan por año; el de DICIEMBRE vive en la carpeta del año anterior."""
-    return f"{CONTABILIDAD}/registro jornada/{anio}"
 
 # hoja del registro -> (técnico en ALTAS, patrón)   None = dejar en blanco
 # La hoja de JAMES se llamaba ALVARO hasta que el usuario la renombró en junio;
@@ -146,6 +132,8 @@ def main():
     ap.add_argument("--plantilla", help="xlsx base (por defecto, el registro del mes anterior)")
     ap.add_argument("--altas", help="xlsx de altas (por defecto ALTAS_<MES>_<AÑO>.xlsx)")
     ap.add_argument("--out", help="xlsx de salida (por defecto REGISTRO_JORNADA_<MES>.xlsx)")
+    ap.add_argument("--force", action="store_true",
+                    help="escribe encima del xlsx de salida aunque ya exista")
     args = ap.parse_args()
 
     mes = args.mes.upper()
@@ -158,10 +146,19 @@ def main():
     mes_prev_num, anio_prev = meses.anterior(mes_num, anio)
     mes_prev = meses.nombre(mes_prev_num)
 
-    altas_path = args.altas or f"{altas_dir(anio)}/ALTAS_{mes}_{anio}.xlsx"
-    out_path = args.out or f"{jornada_dir(anio)}/REGISTRO_JORNADA_{mes}.xlsx"
+    altas_path = args.altas or str(meses.ruta_altas(mes, anio))
+    out_path = args.out or str(meses.ruta_jornada(mes, anio))
     # La plantilla es el registro del mes anterior — que en enero está en el año anterior.
-    template = args.plantilla or f"{jornada_dir(anio_prev)}/REGISTRO_JORNADA_{mes_prev}.xlsx"
+    template = args.plantilla or str(meses.ruta_jornada(mes_prev, anio_prev))
+
+    # Antes de leer nada: el registro ya generado se retoca a mano, y escribir encima lo
+    # pisaría sin avisar.
+    if Path(out_path).exists() and not args.force:
+        sys.exit(
+            f"✗ No se sobrescribe un registro de jornada que ya existe:\n    {out_path}\n"
+            "  Después de generarlo se retoca a mano, y regenerarlo perdería esos cambios.\n"
+            "  · Generarlo aparte para comparar:    --out <otra ruta>\n"
+            "  · Rehacerlo encima de todas formas:  --force (haz antes una copia)")
 
     print(f"Mes:       {mes} {anio} ({dias_mes} días)")
     print(f"Altas:     {altas_path}")

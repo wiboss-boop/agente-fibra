@@ -17,13 +17,16 @@ Reglas acordadas con el usuario:
   Sheet (adelantos, gasolina, multas…), TOTAL DESCUENTOS y TOTAL A PAGAR, con fórmulas
   para poder retocarlo a mano. Sustituye al pie que antes se tecleaba en cada hoja.
 
-Uso:  gen_altas_mensual.py --mes JULIO [--anio 2026] [--sheet ID] [--out X] [--write]
+Uso:  gen_altas_mensual.py --mes JULIO [--anio 2026] [--sheet ID] [--out X] [--write] [--force]
 
 Con --strict el script termina con código 2 si quedan duplicados ambiguos sin resolver;
 es la puerta que usa scripts/cierre_mensual.py para no cerrar un mes a medias.
+
+--write no escribe encima de un ALTAS que ya exista: después de generarlo, el usuario lo
+retoca a mano (IRPF, ajustes, pendientes…) y regenerarlo se lo llevaría por delante. Para
+rehacerlo de todas formas, --force.
 """
 import argparse
-import os
 import re
 import sys
 from collections import defaultdict
@@ -41,11 +44,6 @@ from src.sheets.auth import get_sheets_service
 # El Sheet de origen cambia cada mes; el ID lo anota crear_sheet_mensual.py en
 # config/sheets_mensuales.json (ver src/meses.py). --sheet lo sobreescribe.
 MESES = {nombre: i + 1 for i, nombre in enumerate(meses.MESES)}
-BASE = os.environ.get(
-    "SECOMCOL_BASE",
-    "/Users/samaro/Library/CloudStorage/GoogleDrive-salamanca118@gmail.com/"
-    "Mi unidad/SECOMCOL",
-)
 TECS = ["CRISTIAN", "MARTIN", "JAMES", "JEAN", "YOHAN", "ERCS",
         "HANS", "JOEL", "DIANA", "AYMAN", "LUIS E"]
 
@@ -294,7 +292,11 @@ def main() -> None:
     ap.add_argument("--write", action="store_true", help="guarda el .xlsx (si no, dry-run)")
     ap.add_argument("--strict", action="store_true",
                     help="salir con código 2 si hay duplicados ambiguos sin resolver")
+    ap.add_argument("--force", action="store_true",
+                    help="con --write, escribe encima del .xlsx aunque ya exista")
     args = ap.parse_args()
+    if args.force and not args.write:
+        ap.error("--force va con --write: sin --write no se escribe nada")
 
     MES = args.mes.upper()
     ANIO = args.anio
@@ -305,7 +307,16 @@ def main() -> None:
     if not SID:
         ap.error(f"no hay Sheet registrado para {MES} {ANIO} en {meses.REGISTRO}; "
                  f"pásalo con --sheet")
-    OUT = args.out or f"{BASE}/CONTABILIDAD/ALTAS POR TECNICO/{ANIO}/ALTAS_{MES}_{ANIO}.xlsx"
+    OUT = args.out or str(meses.ruta_altas(MES, ANIO))
+    # Antes de leer nada del Sheet: si el ALTAS ya está, lo más probable es que el usuario
+    # ya lo haya retocado, y escribir encima lo pisaría sin avisar.
+    if args.write and Path(OUT).exists() and not args.force:
+        sys.exit(
+            f"✗ No se sobrescribe un ALTAS que ya existe:\n    {OUT}\n"
+            "  Después de generarlo se retoca a mano, y regenerarlo perdería esos cambios.\n"
+            "  · Revisar el mes sin escribir nada:  quita --write\n"
+            "  · Generarlo aparte para comparar:    --out <otra ruta>\n"
+            "  · Rehacerlo encima de todas formas:  --force (haz antes una copia)")
 
     res = RESOLUCIONES.get((MES, ANIO), {})
     KEEP_ONE_DAY = res.get("keep_one_day", {})
