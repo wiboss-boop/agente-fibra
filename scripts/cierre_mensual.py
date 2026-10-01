@@ -8,7 +8,8 @@ encadena los pasos, resuelve los meses solo y VERIFICA que las dos variables que
 apuntando al Sheet nuevo.
 
 Pasos (en este orden, y por este motivo):
-  1. Crear el Sheet del mes NUEVO.        Lo primero: el agente corre hoy a las 18:00.
+  1. Crear el Sheet del mes NUEVO.        Lo primero: el agente corre hoy a las 16:00 de
+                                          Bogotá (21:00 UTC).
   2. Apuntar Railway al Sheet nuevo.      LAS DOS variables, y se comprueba.
   3. ALTAS del mes CERRADO.               El mes ya está completo; se puede cerrar.
   4. REGISTRO DE JORNADA del mes CERRADO. Se alimenta del .xlsx del paso 3.
@@ -19,9 +20,13 @@ Uso:
     cierre_mensual.py --write               # ejecuta los pasos 1-4
     cierre_mensual.py --paso 2 --write      # repite un paso suelto
     cierre_mensual.py --mes-nuevo SEPTIEMBRE --anio 2026
+    cierre_mensual.py --paso 1 --write --id <id>   # paso 1 sin el token de Drive
 
 Requisitos (todos locales, no corre en Railway): venv con las dependencias, el token de
 Drive de la cuenta humana, el JSON del service account y la CLI de railway logueada.
+Si el token de Drive ha caducado, el paso 1 no lo necesita: la cuenta humana crea un
+Sheet vacío con el título del mes, lo comparte como Editor con el service account y se
+pasa con --id (ver crear_sheet_mensual.py).
 """
 import argparse
 import json
@@ -107,10 +112,17 @@ def paso_1_crear_sheet(ctx, write):
         return
     cmd = _script("crear_sheet_mensual.py", "--mes", ctx["titulo_nuevo"],
                   "--source", ctx["sid_cerrado"])
+    if ctx["id_vacio"]:
+        # el Sheet vacío ya lo creó la cuenta humana: se monta sin el token de Drive
+        cmd += ["--id", ctx["id_vacio"]]
     if write:
         _run(cmd + ["--write"])
     else:
         print(f"  $ {' '.join(cmd)} --write")
+        if not ctx["id_vacio"]:
+            print("  (si el token de Drive ha caducado: crea con la cuenta humana un Sheet vacío "
+                  f"titulado {ctx['titulo_nuevo']},\n   compártelo como Editor con el service "
+                  "account y repite con --id <id>)")
 
 
 def paso_2_railway(ctx, write):
@@ -220,7 +232,13 @@ def main():
                     help="ejecutar solo este paso")
     ap.add_argument("--write", action="store_true",
                     help="ejecuta de verdad (sin este flag solo imprime el plan)")
+    ap.add_argument("--id",
+                    help="paso 1 sin el token de Drive: ID o URL del Sheet vacío del mes nuevo, "
+                         "creado por la cuenta humana y compartido como Editor con el service "
+                         "account")
     args = ap.parse_args()
+    if args.id and args.paso not in (None, 1):
+        ap.error("--id es para el paso 1 (crear el Sheet del mes nuevo)")
 
     hoy = date.today()
     anio_nuevo = args.anio or hoy.year
@@ -240,6 +258,7 @@ def main():
         "titulo_nuevo": f"{mes_nuevo}_{anio_nuevo}",
         "mes_cerrado": mes_cerrado, "anio_cerrado": anio_cerrado,
         "sid_cerrado": sid_cerrado,
+        "id_vacio": args.id,
     }
 
     print("=" * 70)

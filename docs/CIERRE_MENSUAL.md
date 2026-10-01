@@ -25,14 +25,39 @@ ls config/token_drive.json              # token de Drive de la cuenta humana
 ls "$SECOMCOL_SA_FILE"                  # JSON del service account (o su ruta por defecto)
 ```
 
-Si el token de Drive ha caducado, el paso 1 abre el navegador para volver a consentir;
-no es un error. Los scripts se encuentran `src/` solos, no hace falta `PYTHONPATH`.
+Los scripts se encuentran `src/` solos, no hace falta `PYTHONPATH`.
+
+### Si el token de Drive ha caducado
+
+El paso 1 crea el archivo con el token de Drive de la cuenta humana, y ese token caduca: el
+01-oct-2026, tras un mes sin usarse, el refresco daba `invalid_grant`. Renovarlo pide aceptar
+un consentimiento de Google en el navegador, así que el script ya no lo abre por su cuenta:
+para y explica las dos salidas.
+
+- **Sin OAuth (no hace falta nadie delante).** Con la cuenta humana, crear un Google Sheet
+  **vacío** con el título del mes (`OCTUBRE_2026`), en la raíz de Mi unidad como los otros
+  meses, desde drive.google.com o con el conector de Drive. Compartirlo como **Editor** con el
+  service account y montarlo:
+
+  ```bash
+  venv/bin/python scripts/cierre_mensual.py --paso 1 --write --id <id-o-url-del-sheet>
+  ```
+
+  El service account crea las pestañas, copia los valores, siembra las fórmulas e iguala el
+  locale y la zona horaria al mes anterior: queda igual que creado por el script. Antes de
+  tocar nada comprueba que puede editarlo, que el título es el del mes, que está vacío y que
+  el registro no tiene ya otro Sheet para ese mes.
+- **Renovar el token**, con alguien delante del navegador para aceptar:
+
+  ```bash
+  venv/bin/python scripts/crear_sheet_mensual.py --mes OCTUBRE_2026 --reautorizar --write
+  ```
 
 ## Los pasos, y por qué en este orden
 
 | # | Paso | Script | Por qué aquí |
 |---|------|--------|--------------|
-| 1 | Crear el Sheet del mes nuevo | `crear_sheet_mensual.py` | Lo primero: el agente corre hoy a las 18:00 Bogotá y necesita dónde escribir. |
+| 1 | Crear el Sheet del mes nuevo | `crear_sheet_mensual.py` | Lo primero: el agente corre hoy a las 16:00 de Bogotá (21:00 UTC) y necesita dónde escribir. |
 | 2 | Apuntar Railway al Sheet nuevo | `railway variables` | Hasta que no cambian **las dos** variables, el mes nuevo se escribe en el Sheet viejo. |
 | 3 | ALTAS del mes cerrado | `gen_altas_mensual.py` | El mes ya está completo; de aquí sale la nómina. |
 | 4 | Registro de jornada del mes cerrado | `gen_jornada_mensual.py` | Se alimenta del `.xlsx` del paso 3. |
@@ -99,7 +124,8 @@ cierre. Están en `CODIGOS_PENDIENTES`, en `scripts/gen_altas_mensual.py`.
 
 Lo escribe `crear_sheet_mensual.py --write` al crear el mes y lo leen `cierre_mensual.py`
 y `gen_altas_mensual.py`. Antes había que copiar el ID a mano a un dict en el código.
-Si un mes se crea a mano, hay que anotarlo aquí.
+Montado con `--id` también se anota solo; si un mes se crea a mano sin el script, hay que
+anotarlo aquí.
 
 ## Rutas de Google Drive
 
