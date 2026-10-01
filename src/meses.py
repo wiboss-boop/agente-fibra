@@ -4,13 +4,16 @@ Reúne lo que los cuatro scripts del cierre repetían por su cuenta:
 
 - nombres/números de mes y aritmética con salto de año (DICIEMBRE -> ENERO),
 - el registro de spreadsheets mensuales (`config/sheets_mensuales.json`), que sustituye
-  al dict SHEETS que había que editar a mano cada mes en gen_altas_mensual.py.
+  al dict SHEETS que había que editar a mano cada mes en gen_altas_mensual.py,
+- las rutas de Drive de los .xlsx del cierre, para que cierre_mensual.py sepa si un paso
+  ya está hecho mirando la misma ruta en la que escribe el generador.
 
 El registro lo escribe `crear_sheet_mensual.py --write` al crear el mes, y lo leen los
 generadores; así el ID del Sheet nunca se teclea dos veces.
 """
 
 import json
+import os
 from pathlib import Path
 from typing import Dict, Optional, Tuple
 
@@ -19,6 +22,14 @@ MESES = ("ENERO", "FEBRERO", "MARZO", "ABRIL", "MAYO", "JUNIO",
 
 RAIZ = Path(__file__).resolve().parents[1]
 REGISTRO = RAIZ / "config" / "sheets_mensuales.json"
+
+# Carpeta SECOMCOL del Drive de la cuenta humana, sincronizada en el Mac. Con
+# SECOMCOL_BASE se apunta a otra (p.ej. una copia para probar sin tocar el Drive).
+BASE_DRIVE = Path(os.environ.get(
+    "SECOMCOL_BASE",
+    "/Users/samaro/Library/CloudStorage/GoogleDrive-salamanca118@gmail.com/"
+    "Mi unidad/SECOMCOL",
+))
 
 
 def numero(mes: str) -> int:
@@ -83,3 +94,23 @@ def registrar_sheet(mes: str, anio: int, spreadsheet_id: str) -> None:
     }
     REGISTRO.parent.mkdir(parents=True, exist_ok=True)
     REGISTRO.write_text(json.dumps(ordenado, indent=2, ensure_ascii=False) + "\n")
+
+
+# ---------------------------------------------------------------------------
+# Rutas de los .xlsx del cierre en Drive
+# ---------------------------------------------------------------------------
+
+def ruta_altas(mes: str, anio: int) -> Path:
+    """CONTABILIDAD/ALTAS POR TECNICO/<año>/ALTAS_<MES>_<AÑO>.xlsx"""
+    carpeta = BASE_DRIVE / "CONTABILIDAD" / "ALTAS POR TECNICO" / str(anio)
+    return carpeta / f"ALTAS_{mes.strip().upper()}_{anio}.xlsx"
+
+
+def ruta_jornada(mes: str, anio: int) -> Path:
+    """CONTABILIDAD/registro jornada/<año>/REGISTRO_JORNADA_<MES>.xlsx
+
+    Se archivan por año aunque el nombre no lo lleve: el de DICIEMBRE, que es la plantilla
+    del de ENERO, está en la carpeta del año anterior.
+    """
+    carpeta = BASE_DRIVE / "CONTABILIDAD" / "registro jornada" / str(anio)
+    return carpeta / f"REGISTRO_JORNADA_{mes.strip().upper()}.xlsx"

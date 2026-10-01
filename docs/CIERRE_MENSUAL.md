@@ -89,6 +89,21 @@ porque la orden está a medias y todavía no se paga:
 Son discrepancias que se revisan a mano cada mes, así que se listan pero **no** paran el
 cierre. Están en `CODIGOS_PENDIENTES`, en `scripts/gen_altas_mensual.py`.
 
+## El ALTAS y la jornada ya generados no se tocan
+
+Después de generarlos, los dos `.xlsx` se retocan a mano: el ALTAS con el IRPF, las
+garantías, los ajustes y los pendientes; el registro de jornada con las vacaciones.
+Volver a generarlos se llevaría esos retoques por delante, así que:
+
+- `cierre_mensual.py` se salta los pasos 3 y 4 si su `.xlsx` ya está en Drive. Lo dice y
+  enseña el comando para rehacerlo. Repetir esos pasos, sueltos o con el cierre entero, ya
+  no toca lo retocado.
+- `gen_altas_mensual.py --write` y `gen_jornada_mensual.py` no escriben encima de un `.xlsx`
+  que ya existe. Rehacerlo hay que pedirlo con `--force`, y lo retocado se pierde: haz
+  antes una copia. Con `--out <otra ruta>` se genera aparte, para comparar.
+
+`gen_altas_mensual.py` sin `--write` sigue sirviendo para revisar el mes: no escribe nada.
+
 ## Registro de Sheets
 
 `config/sheets_mensuales.json` guarda el ID del spreadsheet de cada mes:

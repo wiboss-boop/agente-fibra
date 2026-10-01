@@ -14,6 +14,9 @@ Pasos (en este orden, y por este motivo):
   4. REGISTRO DE JORNADA del mes CERRADO. Se alimenta del .xlsx del paso 3.
   5. Conciliación.                        Manual: los anexos del contratista llegan tarde.
 
+Los pasos 3 y 4 no se repiten si su .xlsx ya está en Drive: después de generarlo se retoca
+a mano, y regenerarlo lo pisaría. Rehacerlo es aparte: el generador con --force.
+
 Uso:
     cierre_mensual.py                       # plan del cierre de hoy, no toca nada
     cierre_mensual.py --write               # ejecuta los pasos 1-4
@@ -58,6 +61,22 @@ def _run(cmd, check=True, capture=False):
 
 def _script(nombre, *args):
     return [sys.executable, str(RAIZ / "scripts" / nombre), *args]
+
+
+def _ya_generado(ruta, rehacer):
+    """True si el .xlsx del paso ya está en Drive; entonces el paso no se repite.
+
+    El ALTAS y el registro de jornada se retocan a mano después de generarlos: repetir el
+    paso (o lanzar el cierre entero otra vez) se llevaría esos retoques por delante.
+    Rehacerlos es otra decisión, y se toma a mano con --force.
+    """
+    if not ruta.exists():
+        return False
+    print(f"  ✓ {ruta.name} ya está generado — no se toca: puede estar retocado a mano")
+    print(f"    {ruta}")
+    print("    Para rehacerlo encima, perdiendo lo retocado:")
+    print(f"    $ {' '.join(rehacer)} --force")
+    return True
 
 
 def _leer_variables(servicio):
@@ -159,6 +178,9 @@ def paso_3_altas(ctx, write):
     """Genera ALTAS_<MES_CERRADO>_<AÑO>.xlsx, parando si hay duplicados ambiguos."""
     base = _script("gen_altas_mensual.py", "--mes", ctx["mes_cerrado"],
                    "--anio", str(ctx["anio_cerrado"]))
+    if _ya_generado(meses.ruta_altas(ctx["mes_cerrado"], ctx["anio_cerrado"]),
+                    base + ["--write"]):
+        return
     if not write:
         print(f"  $ {' '.join(base)} --strict      # revisión")
         print(f"  $ {' '.join(base)} --write       # genera el .xlsx")
@@ -187,6 +209,8 @@ def paso_4_jornada(ctx, write):
     """Genera REGISTRO_JORNADA_<MES_CERRADO>.xlsx a partir de las altas del paso 3."""
     cmd = _script("gen_jornada_mensual.py", "--mes", ctx["mes_cerrado"],
                   "--anio", str(ctx["anio_cerrado"]))
+    if _ya_generado(meses.ruta_jornada(ctx["mes_cerrado"], ctx["anio_cerrado"]), cmd):
+        return
     if write:
         _run(cmd)
     else:
