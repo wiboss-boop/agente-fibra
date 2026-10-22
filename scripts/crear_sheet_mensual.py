@@ -54,7 +54,7 @@ OAUTH_CLIENT = "config/google_oauth_credentials.json"
 OAUTH_TOKEN = "config/token_drive.json"   # token aparte (con scope drive), no toca el del agente
 
 TECNICOS = ["CRISTIAN", "MARTIN", "JAMES", "JEAN", "YOHAN", "ERCS",
-            "HANS", "JOEL", "DIANA", "AYMAN", "LUIS E"]
+            "HANS", "JOSE", "DIANA", "AYMAN", "LUIS E"]
 INTEGRAS = ["Base", "Hoja6"]        # copiar íntegras
 SOLO_HEADER_1 = ["Descuentos"]      # solo fila 1
 OMITIR_PREFIJOS = ("Hoja1", "Discrepancias")
@@ -63,7 +63,7 @@ OMITIR_PREFIJOS = ("Hoja1", "Discrepancias")
 ORDEN = ["Base"] + TECNICOS + ["Hoja6", "Descuentos"]
 
 # Las fórmulas de tarifado se siembran hasta esta fila (igual que hacía nuevo_mes.py).
-# En las hojas que escribe el bot de alarmas (JEAN/JOEL/DIANA/MARTIN) el bot pisa la
+# En las hojas que escribe el bot de alarmas (JEAN/JOSE/DIANA/MARTIN) el bot pisa la
 # fórmula con el valor resuelto al escribir cada fila — mismo comportamiento que julio.
 FORMULA_LAST_ROW = 500
 
