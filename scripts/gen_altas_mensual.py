@@ -45,7 +45,7 @@ from src.sheets.auth import get_sheets_service
 # config/sheets_mensuales.json (ver src/meses.py). --sheet lo sobreescribe.
 MESES = {nombre: i + 1 for i, nombre in enumerate(meses.MESES)}
 TECS = ["CRISTIAN", "MARTIN", "JAMES", "JEAN", "YOHAN", "ERCS",
-        "HANS", "JOSE", "DIANA", "AYMAN", "LUIS E"]
+        "HANS", "JOSE", "DIANA", "AYMAN", "LUIS E", "RICARDO"]
 
 STOP = {"FESTIVOS", "DESCUENTOS", "TOTAL", "TOTALES", "SUBTOTAL", "IRPF",
         "SECOMCOL", "SEG SOCIAL", "G BRUTA", "SIN ALTAS", "SIN PARTE",

@@ -8,6 +8,7 @@
     FULL (7h): 09:00 / 16:00 · 13;00 / 19:00 · ordinarias 7 · total 7
     PART (2h): 11:00 · 13:00 · ordinarias 2 · total 2      (AYMAN)
     PART9 (2h): 09:00 · 11:00 · ordinarias 2 · total 2     (JOSE: contrato L–S de 9 a 11)
+    PART10 (2h): 10:00 · 12:00 · ordinarias 2 · total 2    (RICARDO: contrato L–S de 10 a 12)
 - DIEGO y JOEL ya no trabajan → hoja en blanco.
 - Un trabajador nuevo no tiene hoja en la plantilla: se clona la de otro (HOJAS_NUEVAS) y
   se le pone su encabezado, que sale de config/trabajadores_registro.json. Ese fichero no
@@ -52,6 +53,7 @@ MAPEO = {
     "JEAN MARCO": ("JEAN",     "FULL"),
     "JOEL":       (None,       "PART"),   # dejó de trabajar en sept-2026; hoja en blanco
     "JOSE":       ("JOSE",     "PART9"),  # entra el 16-oct-2026 en las alarmas de JOEL
+    "RICARDO":    ("RICARDO",  "PART10"), # entra el 21-oct-2026 en alarmas
     "JAMES":      ("JAMES",    "FULL"),
     "ERCS":       ("ERCS",     "FULL"),
     "YOHAN":      ("YOHAN",    "FULL"),
@@ -65,7 +67,7 @@ ALIAS_HOJA = {"JAMES": "ALVARO"}   # nombre alternativo si la plantilla es antig
 
 # hoja nueva -> hoja de la plantilla que se clona para crearla (solo el mes de su alta:
 # a partir del siguiente ya viene en la plantilla)
-HOJAS_NUEVAS = {"JOSE": "JOEL"}
+HOJAS_NUEVAS = {"JOSE": "JOEL", "RICARDO": "JOEL"}
 DATOS_TRABAJADORES = Path(__file__).resolve().parents[1] / "config" / "trabajadores_registro.json"
 CAMPOS_TRABAJADOR = ("nombre", "nif", "naf", "horas_contrato", "alta")
 
@@ -147,7 +149,17 @@ def escribir_part9(ws, fila):
     _set(ws, fila, 9, 2)
 
 
-ESCRIBIR = {"FULL": escribir_full, "PART": escribir_part, "PART9": escribir_part9}
+def escribir_part10(ws, fila):
+    _set(ws, fila, 2, time(10, 0), "hh:mm")
+    _set(ws, fila, 3, None)
+    _set(ws, fila, 4, time(12, 0), "hh:mm")
+    _set(ws, fila, 5, None)
+    _set(ws, fila, 6, 2)
+    _set(ws, fila, 9, 2)
+
+
+ESCRIBIR = {"FULL": escribir_full, "PART": escribir_part, "PART9": escribir_part9,
+            "PART10": escribir_part10}
 
 
 def datos_trabajador(hoja):
@@ -168,11 +180,14 @@ def datos_trabajador(hoja):
 
 
 def crear_hoja(wb, hoja, origen, datos):
-    """Clona `origen` como `hoja`, justo detrás, con el encabezado del trabajador nuevo.
+    """Clona `origen` como `hoja`, detrás de ella y de las ya clonadas de ella, con el
+    encabezado del trabajador nuevo.
     Las horas las limpia después el bucle general, como en cualquier otra hoja."""
     ws = wb.copy_worksheet(wb[origen])
     ws.title = hoja
-    wb.move_sheet(ws, offset=wb.sheetnames.index(origen) + 1 - wb.sheetnames.index(hoja))
+    hermanas = [h for h, o in HOJAS_NUEVAS.items() if o == origen and h != hoja and h in wb.sheetnames]
+    destino = max(wb.sheetnames.index(h) for h in [origen] + hermanas) + 1
+    wb.move_sheet(ws, offset=destino - wb.sheetnames.index(hoja))
 
     # Nombre en E; NIF, NAF y horas de contrato en B, B y F de sus filas.
     puestos = {}
