@@ -11,3 +11,4 @@ __pycache__/
 *.pyc
 .env
 .DS_Store
+config/trabajadores_registro.json

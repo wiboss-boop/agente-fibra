@@ -6,8 +6,13 @@
 - Cada hoja conserva encabezado, formato, fórmula de total y firmas.
 - Patrón por día:
     FULL (7h): 09:00 / 16:00 · 13;00 / 19:00 · ordinarias 7 · total 7
-    PART (2h): 11:00 · 13:00 · ordinarias 2 · total 2      (JOEL, AYMAN)
-- DIEGO ya no trabaja → hoja en blanco.
+    PART (2h): 11:00 · 13:00 · ordinarias 2 · total 2      (AYMAN)
+    PART9 (2h): 09:00 · 11:00 · ordinarias 2 · total 2     (JOSE: contrato L–S de 9 a 11)
+- DIEGO y JOEL ya no trabajan → hoja en blanco.
+- Un trabajador nuevo no tiene hoja en la plantilla: se clona la de otro (HOJAS_NUEVAS) y
+  se le pone su encabezado, que sale de config/trabajadores_registro.json. Ese fichero no
+  va en git porque el repo es público y lleva NIF y NAF. Los días anteriores a su alta
+  quedan en blanco y el periodo de liquidación empieza el día del alta.
 - OJO: las hojas NO están todas alineadas — algunas no tienen fila "Periodo de
   liquidación", así que su rejilla arranca una fila más arriba. Por eso la rejilla se
   localiza por contenido ("Día del mes" / "Total horas mes"), no por fila fija.
@@ -23,6 +28,7 @@ Uso:  gen_jornada_mensual.py --mes JULIO [--anio 2026] [--plantilla X] [--altas 
 """
 import argparse
 import calendar
+import json
 import sys
 from datetime import date, time
 from pathlib import Path
@@ -44,7 +50,8 @@ MAPEO = {
     "CRISTIAN":   ("CRISTIAN", "FULL"),
     "HANS":       ("HANS",     "FULL"),
     "JEAN MARCO": ("JEAN",     "FULL"),
-    "JOEL":       ("JOEL",     "PART"),
+    "JOEL":       (None,       "PART"),   # dejó de trabajar en sept-2026; hoja en blanco
+    "JOSE":       ("JOSE",     "PART9"),  # entra el 16-oct-2026 en las alarmas de JOEL
     "JAMES":      ("JAMES",    "FULL"),
     "ERCS":       ("ERCS",     "FULL"),
     "YOHAN":      ("YOHAN",    "FULL"),
@@ -55,6 +62,12 @@ MAPEO = {
     "LUIS E":     ("LUIS E",   "FULL"),
 }
 ALIAS_HOJA = {"JAMES": "ALVARO"}   # nombre alternativo si la plantilla es antigua
+
+# hoja nueva -> hoja de la plantilla que se clona para crearla (solo el mes de su alta:
+# a partir del siguiente ya viene en la plantilla)
+HOJAS_NUEVAS = {"JOSE": "JOEL"}
+DATOS_TRABAJADORES = Path(__file__).resolve().parents[1] / "config" / "trabajadores_registro.json"
+CAMPOS_TRABAJADOR = ("nombre", "nif", "naf", "horas_contrato", "alta")
 
 
 def dias_trabajados(path, mes_num):
@@ -125,6 +138,70 @@ def escribir_part(ws, fila):
     _set(ws, fila, 9, 2)
 
 
+def escribir_part9(ws, fila):
+    _set(ws, fila, 2, time(9, 0), "hh:mm")
+    _set(ws, fila, 3, None)
+    _set(ws, fila, 4, time(11, 0), "hh:mm")
+    _set(ws, fila, 5, None)
+    _set(ws, fila, 6, 2)
+    _set(ws, fila, 9, 2)
+
+
+ESCRIBIR = {"FULL": escribir_full, "PART": escribir_part, "PART9": escribir_part9}
+
+
+def datos_trabajador(hoja):
+    """Encabezado de una hoja nueva, de config/trabajadores_registro.json."""
+    try:
+        datos = json.loads(DATOS_TRABAJADORES.read_text())[hoja]
+    except (FileNotFoundError, KeyError):
+        datos = {}
+    faltan = [c for c in CAMPOS_TRABAJADOR if not datos.get(c)]
+    if faltan:
+        # Sin estos datos la hoja clonada saldría con los del trabajador al que sustituye.
+        sys.exit(
+            f"✗ Faltan datos de la hoja nueva {hoja} ({', '.join(faltan)}) en:\n"
+            f"    {DATOS_TRABAJADORES}\n"
+            f'  Formato: {{"{hoja}": {{"nombre": "…", "nif": "…", "naf": "…", '
+            '"horas_contrato": 12, "alta": "AAAA-MM-DD"}}')
+    return datos
+
+
+def crear_hoja(wb, hoja, origen, datos):
+    """Clona `origen` como `hoja`, justo detrás, con el encabezado del trabajador nuevo.
+    Las horas las limpia después el bucle general, como en cualquier otra hoja."""
+    ws = wb.copy_worksheet(wb[origen])
+    ws.title = hoja
+    wb.move_sheet(ws, offset=wb.sheetnames.index(origen) + 1 - wb.sheetnames.index(hoja))
+
+    # Nombre en E; NIF, NAF y horas de contrato en B, B y F de sus filas.
+    puestos = {}
+    for r in range(1, ws.max_row + 1):
+        t = _texto(ws, r).lower()
+        if t.startswith("nombre y apellidos"):
+            puestos["nombre"] = (r, 5)
+        elif t.startswith("nif"):
+            puestos["nif"], puestos["horas"] = (r, 2), (r, 6)
+        elif t.startswith("naf"):
+            puestos["naf"] = (r, 2)
+    # Si algún dato no está donde se espera, se quedaría el del trabajador anterior.
+    raros = [k for k in ("nombre", "nif", "naf", "horas")
+             if k not in puestos or not ws.cell(*puestos[k]).value]
+    if raros:
+        sys.exit(f"✗ La hoja {origen} no tiene el encabezado donde se espera ({', '.join(raros)}):"
+                 f" no se puede clonar para {hoja}.")
+    ws.cell(*puestos["nombre"]).value = datos["nombre"]
+    ws.cell(*puestos["nif"]).value = datos["nif"]
+    ws.cell(*puestos["naf"]).value = datos["naf"]
+    ws.cell(*puestos["horas"]).value = f"Nº horas según contrato:  {datos['horas_contrato']}"
+
+    # La firma diaria (VACACIONES…) es del trabajador anterior y el bucle general no la toca.
+    fila1, fila_total, _, _ = localizar(ws)
+    for r in range(fila1, fila_total):
+        _set(ws, r, 10, None)
+    return ws
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--mes", required=True, help="mes en mayúsculas, p.ej. JULIO")
@@ -174,6 +251,14 @@ def main():
     for hoja, (tecnico, patron) in MAPEO.items():
         if hoja not in wb.sheetnames and ALIAS_HOJA.get(hoja) in wb.sheetnames:
             hoja = ALIAS_HOJA[hoja]      # plantilla antigua: JAMES aún se llama ALVARO
+        desde = 1                        # primer día del mes que cuenta para esta hoja
+        if hoja not in wb.sheetnames and HOJAS_NUEVAS.get(hoja) in wb.sheetnames:
+            datos = datos_trabajador(hoja)
+            crear_hoja(wb, hoja, HOJAS_NUEVAS[hoja], datos)
+            alta = date.fromisoformat(datos["alta"])
+            if (alta.year, alta.month) == (anio, mes_num):
+                desde = alta.day
+            print(f"  ℹ {hoja}: hoja nueva, clonada de {HOJAS_NUEVAS[hoja]}; alta el {alta:%d/%m/%Y}")
         if hoja not in wb.sheetnames:
             sin_hoja.append(hoja)
             continue
@@ -212,16 +297,19 @@ def main():
 
         # periodo (si la hoja tiene esa fila) y fecha de recibido
         if fila_periodo:
-            _set(ws, fila_periodo, 4, inicio)
+            _set(ws, fila_periodo, 4, date(anio, mes_num, desde))
             _set(ws, fila_periodo, 10, fin)
         if fila_recibido:
             _set(ws, fila_recibido, 1, fin)
 
-        trabajados = sorted(d for d in dias.get(tecnico, set()) if 1 <= d <= dias_mes) if tecnico else []
+        trabajados = sorted(d for d in dias.get(tecnico, set()) if desde <= d <= dias_mes) if tecnico else []
+        antes_del_alta = sorted(d for d in dias.get(tecnico, set()) if d < desde) if tecnico else []
+        if antes_del_alta:
+            print(f"  ⚠ {hoja}: altas antes de su alta, días {antes_del_alta}: no se registran")
         for d in trabajados:
             fila = dia_a_fila.get(d)
             if fila:
-                (escribir_full if patron == "FULL" else escribir_part)(ws, fila)
+                ESCRIBIR[patron](ws, fila)
 
         etiqueta = hoja if (tecnico is None or tecnico == hoja) else f"{hoja}→{tecnico}"
         resumen.append((etiqueta, patron, len(trabajados), fila_periodo is not None, trabajados))
