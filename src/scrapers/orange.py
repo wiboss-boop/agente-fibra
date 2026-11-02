@@ -18,6 +18,8 @@ from typing import List, Optional, Tuple
 import yaml
 from playwright.sync_api import sync_playwright, Page, TimeoutError as PWTimeout
 
+from src.scrapers import fallos
+
 logger = logging.getLogger(__name__)
 
 _CONFIG_PATH = Path("config/credentials.yaml")
@@ -35,10 +37,12 @@ def run(
     target_date: Optional[date] = None,
     downloads_dir: Path = Path("downloads"),
     headless: bool = True,
+    errores: Optional[List[dict]] = None,
 ) -> Tuple[List[Path], List[dict]]:
     """
     Descarga los PDFs de Orange/Polar para todos los técnicos en la fecha indicada.
     Retorna (lista de PDFs descargados, lista de registros de incidencia sin PDF).
+    Si se pasa `errores`, añade ahí un dict por técnico que falló (ver fallos.registrar).
     """
     if target_date is None:
         target_date = date.today()
@@ -56,7 +60,8 @@ def run(
     with sync_playwright() as pw:
         browser = pw.chromium.launch(headless=headless)
         for tech in technicians:
-            downloaded, incidencias = _process_technician(browser, tech, target_date, downloads_dir)
+            downloaded, incidencias = _process_technician(browser, tech, target_date, downloads_dir,
+                                                          errores)
             all_downloaded.extend(downloaded)
             all_incidencias.extend(incidencias)
         browser.close()
@@ -71,7 +76,8 @@ def run(
 # ---------------------------------------------------------------------------
 
 def _process_technician(
-    browser, tech: dict, target_date: date, downloads_dir: Path
+    browser, tech: dict, target_date: date, downloads_dir: Path,
+    errores: Optional[List[dict]] = None,
 ) -> Tuple[List[Path], List[dict]]:
     name = tech["name"]
     logger.info("Orange → %s (%s)", name, tech["orange_user"])
@@ -120,8 +126,10 @@ def _process_technician(
 
     except PWTimeout as exc:
         logger.error("Orange / %s: timeout — %s", name, exc)
+        fallos.registrar(errores, "Orange", tech, tech["orange_user"], exc)
     except Exception as exc:
         logger.error("Orange / %s: error — %s", name, exc, exc_info=True)
+        fallos.registrar(errores, "Orange", tech, tech["orange_user"], exc)
     finally:
         try:
             _logout(page)
@@ -171,7 +179,7 @@ def _login(page: Page, username: str, password: str) -> None:
         err = page.locator(".alert-danger, [class*='error']")
         if err.count() > 0:
             error_msg = err.first.inner_text().strip()
-        raise RuntimeError(f"Login fallido para {username}: {error_msg or 'credenciales incorrectas'}")
+        raise fallos.LoginFallido(f"Login fallido para {username}: {error_msg or 'credenciales incorrectas'}")
 
 
 def _logout(page: Page) -> None:

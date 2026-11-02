@@ -106,13 +106,17 @@ def main() -> None:
     orange_incidencias: List[dict] = []
     kairos_sin_parte: List[dict] = []
     scraper_errors: List[str] = []
+    # Fallos de un técnico concreto (login rechazado, timeout…): el scraper sigue con el
+    # siguiente y antes solo quedaban en el log.
+    fallos_tecnico: List[dict] = []
 
     if not args.no_scrape:
         from src.scrapers import kairos, orange
 
         logger.info("Iniciando scraper Kairos…")
         try:
-            _, kairos_sin_parte = kairos.run(target_date=target_date, downloads_dir=downloads_dir, headless=headless)
+            _, kairos_sin_parte = kairos.run(target_date=target_date, downloads_dir=downloads_dir,
+                                             headless=headless, errores=fallos_tecnico)
         except Exception as exc:
             logger.error("Scraper Kairos falló: %s", exc, exc_info=True)
             scraper_errors.append(f"Kairos: {exc}")
@@ -120,7 +124,8 @@ def main() -> None:
         logger.info("Iniciando scraper Orange…")
         try:
             _, orange_incidencias = orange.run(
-                target_date=target_date, downloads_dir=downloads_dir, headless=headless
+                target_date=target_date, downloads_dir=downloads_dir, headless=headless,
+                errores=fallos_tecnico,
             )
         except Exception as exc:
             logger.error("Scraper Orange falló: %s", exc, exc_info=True)
@@ -177,9 +182,14 @@ def main() -> None:
     # -----------------------------------------------------------------------
     # 4. Añadir SIN ALTAS para técnicos sin registros
     # -----------------------------------------------------------------------
+    # Un técnico cuyo portal falló no es «sin altas»: no se sabe. Se deja sin fila para
+    # recuperar el día cuando se arregle, y el Telegram lo avisa.
     tecnicos_con_altas = {r.get("tecnico") for r in records if r.get("tecnico")}
+    tecnicos_con_fallo = {f["tecnico"] for f in fallos_tecnico}
     todos_tecnicos = {t["name"] for t in config.get("technicians", [])}
-    for tecnico in sorted(todos_tecnicos - tecnicos_con_altas):
+    for tecnico in sorted(tecnicos_con_fallo - tecnicos_con_altas):
+        logger.warning("Sin dato hoy (falló el portal, no se apunta SIN ALTAS): %s", tecnico)
+    for tecnico in sorted(todos_tecnicos - tecnicos_con_altas - tecnicos_con_fallo):
         records.append({
             "orden": "-",
             "fecha": target_date.strftime("%d/%m/%Y"),
@@ -225,14 +235,16 @@ def main() -> None:
     print(f"  Incidencias      : {n_incidencias}")
     print(f"  Sin técnico      : {n_sin_tecnico}")
     print(f"  Errores parseo   : {len(parse_errors)}")
-    print(f"  Errores scraper  : {len(scraper_errors)}")
+    print(f"  Errores scraper  : {len(scraper_errors) + len(fallos_tecnico)}")
     print(f"  Movidos a proc.  : {moved}")
     print("=" * 50)
 
-    if scraper_errors:
+    if scraper_errors or fallos_tecnico:
         print("\nErrores en scrapers:")
         for err in scraper_errors:
             print(f"  · {err}")
+        for f in fallos_tecnico:
+            print(f"  · {f['plataforma']} / {f['tecnico']} ({f['usuario']}): {f['error']}")
 
     if parse_errors:
         print("\nPDFs con error de parseo (no movidos):")
@@ -249,11 +261,40 @@ def main() -> None:
     # 8. Notificación Telegram
     # -----------------------------------------------------------------------
     _send_telegram_summary(target_date, len(pdfs), counters, n_incidencias,
-                           len(parse_errors), len(scraper_errors), moved)
+                           len(parse_errors), len(scraper_errors) + len(fallos_tecnico), moved,
+                           fallos_tecnico)
+
+
+def _md(texto: str) -> str:
+    """Escapa lo que el Markdown de Telegram interpretaría (un «_» suelto tumba el envío)."""
+    for c in ("_", "*", "`", "["):
+        texto = texto.replace(c, "\\" + c)
+    return texto
+
+
+def _lineas_fallos(fallos_tecnico):
+    """Bloque del Telegram con los técnicos cuyo portal falló, separando los logins."""
+    if not fallos_tecnico:
+        return []
+    lines = []
+    logins = [f for f in fallos_tecnico if f["login"]]
+    otros = [f for f in fallos_tecnico if not f["login"]]
+    if logins:
+        lines += ["", "🔑 *No deja entrar en el portal* (¿contraseña caducada o cambiada?):"]
+        lines += [f"  · {f['plataforma']} / {_md(f['tecnico'])} ({_md(f['usuario'])})" for f in logins]
+        lines.append(_md("Cambiarla en el portal, en config/credentials.yaml y en "
+                         "CREDENTIALS_YAML de Railway."))
+    if otros:
+        lines += ["", "⚠️ *Fallos del portal:*"]
+        lines += [f"  · {f['plataforma']} / {_md(f['tecnico'])}: {_md(f['error'])}" for f in otros]
+    nombres = sorted({f["tecnico"] for f in fallos_tecnico})
+    lines.append(_md(f"No se apunta SIN ALTAS a {', '.join(nombres)}: "
+                     "hay que recuperar el día cuando funcione."))
+    return lines
 
 
 def _send_telegram_summary(target_date, n_pdfs, counters, n_incidencias,
-                            n_parse_errors, n_scraper_errors, moved):
+                            n_parse_errors, n_scraper_errors, moved, fallos_tecnico=()):
     import urllib.request
     import json
     token = os.environ.get("TELEGRAM_TOKEN", "")
@@ -261,8 +302,9 @@ def _send_telegram_summary(target_date, n_pdfs, counters, n_incidencias,
     if not token:
         logger.warning("TELEGRAM_TOKEN no configurado — resumen no enviado")
         return
+    icono = "⚠️" if (fallos_tecnico or n_scraper_errors or n_parse_errors) else "✅"
     lines = [
-        f"✅ *Agente fibra — {target_date.strftime('%d/%m/%Y')}*",
+        f"{icono} *Agente fibra — {target_date.strftime('%d/%m/%Y')}*",
         f"PDFs procesados: {n_pdfs}",
         f"Escritos en Sheet: {counters['escritos']}",
         f"Duplicados: {counters['duplicados']}",
@@ -275,6 +317,7 @@ def _send_telegram_summary(target_date, n_pdfs, counters, n_incidencias,
         lines.append("⚠️ Hay PDFs con error de parseo")
     if n_scraper_errors > 0:
         lines.append("⚠️ Hay errores en scrapers")
+    lines += _lineas_fallos(fallos_tecnico)
     text = "\n".join(lines)
     url = f"https://api.telegram.org/bot{token}/sendMessage"
     data = json.dumps({"chat_id": chat_id, "text": text, "parse_mode": "Markdown"}).encode()
