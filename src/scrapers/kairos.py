@@ -19,6 +19,8 @@ from typing import List, Optional
 import yaml
 from playwright.sync_api import sync_playwright, Page, BrowserContext, TimeoutError as PWTimeout
 
+from src.scrapers import fallos
+
 logger = logging.getLogger(__name__)
 
 _CONFIG_PATH = Path("config/credentials.yaml")
@@ -36,10 +38,12 @@ def run(
     target_date: Optional[date] = None,
     downloads_dir: Path = Path("downloads"),
     headless: bool = True,
+    errores: Optional[List[dict]] = None,
 ) -> List[Path]:
     """
     Descarga los PDFs de Kairos para todos los técnicos en la fecha indicada.
     Retorna lista de rutas de PDFs descargados.
+    Si se pasa `errores`, añade ahí un dict por técnico que falló (ver fallos.registrar).
     """
     if target_date is None:
         target_date = date.today()
@@ -53,7 +57,8 @@ def run(
     with sync_playwright() as pw:
         browser = pw.chromium.launch(headless=headless)
         for tech in technicians:
-            downloaded, sin_parte = _process_technician(browser, tech, target_date, downloads_dir)
+            downloaded, sin_parte = _process_technician(browser, tech, target_date, downloads_dir,
+                                                        errores)
             all_downloaded.extend(downloaded)
             all_sin_parte.extend(sin_parte)
         browser.close()
@@ -66,7 +71,8 @@ def run(
 # Procesamiento por técnico
 # ---------------------------------------------------------------------------
 
-def _process_technician(browser, tech: dict, target_date: date, downloads_dir: Path) -> List[Path]:
+def _process_technician(browser, tech: dict, target_date: date, downloads_dir: Path,
+                        errores: Optional[List[dict]] = None) -> List[Path]:
     name = tech["name"]
     logger.info("Kairos → %s (%s)", name, tech["kairos_user"])
 
@@ -120,8 +126,10 @@ def _process_technician(browser, tech: dict, target_date: date, downloads_dir: P
 
     except PWTimeout as exc:
         logger.error("Kairos / %s: timeout — %s", name, exc)
+        fallos.registrar(errores, "Kairos", tech, tech["kairos_user"], exc)
     except Exception as exc:
         logger.error("Kairos / %s: error — %s", name, exc, exc_info=True)
+        fallos.registrar(errores, "Kairos", tech, tech["kairos_user"], exc)
     finally:
         try:
             _logout(page)
@@ -155,7 +163,7 @@ def _login(page: Page, username: str, password: str) -> None:
         err = page.locator(".alert-danger, .alert.alert-danger, [class*='error']")
         if err.count() > 0:
             error_msg = err.first.inner_text().strip()
-        raise RuntimeError(f"Login fallido para {username}: {error_msg or 'credenciales incorrectas'}")
+        raise fallos.LoginFallido(f"Login fallido para {username}: {error_msg or 'credenciales incorrectas'}")
 
 
 def _logout(page: Page) -> None:
