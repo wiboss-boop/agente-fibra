@@ -40,6 +40,10 @@ class Codigo2FAError(RuntimeError):
     """No se pudo conseguir el código: faltan las variables, falla el buzón o no llegó."""
 
 
+class CodigoNoLlego(Codigo2FAError):
+    """El buzón funciona, pero el código no llegó en el tiempo de espera."""
+
+
 def _sin_tildes(txt: str) -> str:
     return "".join(c for c in unicodedata.normalize("NFD", txt) if unicodedata.category(c) != "Mn")
 
@@ -161,5 +165,5 @@ class BuzonCodigos:
                 if codigo:
                     return codigo
                 if reloj() >= fin:
-                    raise Codigo2FAError(f"No llegó el código de Polar a {direccion} en {int(timeout)} s")
+                    raise CodigoNoLlego(f"No llegó el código de Polar a {direccion} en {int(timeout)} s")
                 dormir(cada)

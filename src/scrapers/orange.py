@@ -21,7 +21,7 @@ import yaml
 from playwright.sync_api import sync_playwright, Page, TimeoutError as PWTimeout
 
 from src.scrapers import fallos
-from src.scrapers.codigo_2fa import BuzonCodigos, Codigo2FAError
+from src.scrapers.codigo_2fa import BuzonCodigos, Codigo2FAError, CodigoNoLlego
 
 logger = logging.getLogger(__name__)
 
@@ -238,24 +238,8 @@ def _pasar_2fa(page: Page, username: str, nombre: str, correo: Optional[str],
         raise fallos.LoginFallido(f"Polar pide código 2FA a {username} y no se puede leer el correo: "
                                   f"{aviso_buzon}")
     correo = correo or buzon.direccion(nombre or username)
-
-    proveedor = (page.locator("#hdnProveedor2FA").input_value() or "").strip()
-    if proveedor.lower() != "email":
-        logger.info("Orange: el 2FA de %s sale por %s; se cambia a correo", username, proveedor or "?")
-        marca = buzon.marca()
-        page.click("#mostrarOpcionesFA2")
-        opcion = page.locator("#Email-option")
-        try:
-            opcion.wait_for(state="visible", timeout=15_000)
-        except PWTimeout:
-            raise fallos.LoginFallido(f"Polar pide 2FA por {proveedor} a {username} "
-                                      f"y la cuenta no ofrece el correo") from None
-        opcion.click()
-        page.locator("#form-2FA").wait_for(state="visible", timeout=15_000)
-
-    logger.info("Orange: esperando el código 2FA de %s en %s", username, correo)
     try:
-        codigo = buzon.esperar_codigo(correo, marca)
+        codigo = _codigo_del_correo(page, username, correo, buzon, marca)
     except Codigo2FAError as exc:
         raise fallos.LoginFallido(f"2FA de {username}: {exc}") from None
 
@@ -267,6 +251,40 @@ def _pasar_2fa(page: Page, username: str, nombre: str, correo: Optional[str],
         raise fallos.LoginFallido(f"Polar no aceptó el código 2FA de {username}: "
                                   f"{_mensaje_error(page) or 'sin mensaje'}") from None
     logger.info("Orange: %s dentro con 2FA por correo", username)
+
+
+# Los correos de Polar llegan en 1-2 s; esto es margen de sobra.
+_ESPERA_CORREO = 90
+
+
+def _codigo_del_correo(page: Page, username: str, correo: str, buzon: BuzonCodigos,
+                       marca: dict) -> str:
+    """El código que Polar acaba de mandar al correo del técnico.
+
+    No se mira `#hdnProveedor2FA` para saber por dónde sale: es un valor por defecto del servidor
+    que va cambiando entre «SMS» y «Email» y no refleja la cookie `fa2prov`. El 16-nov-2026 decía
+    «SMS» y los códigos llegaron igual al correo. Por eso se espera al correo primero, y solo si no
+    llega se pide otra vez eligiendo el correo a mano.
+    """
+    logger.info("Orange: esperando el código 2FA de %s en %s", username, correo)
+    try:
+        return buzon.esperar_codigo(correo, marca, timeout=_ESPERA_CORREO)
+    except CodigoNoLlego:
+        pass
+
+    logger.warning("Orange: no llegó el código de %s en %d s; se pide otra vez eligiendo el correo",
+                   username, _ESPERA_CORREO)
+    marca = buzon.marca()
+    try:
+        page.click("#mostrarOpcionesFA2", timeout=10_000)
+        opcion = page.locator("#Email-option")
+        opcion.wait_for(state="visible", timeout=15_000)
+        opcion.click()
+        page.locator("#form-2FA").wait_for(state="visible", timeout=15_000)
+    except PWTimeout:
+        raise Codigo2FAError(f"no llegó el código a {correo} en {_ESPERA_CORREO} s y Polar no deja "
+                             f"pedirlo de nuevo por correo. ¿Tiene la cuenta puesto ese correo?") from None
+    return buzon.esperar_codigo(correo, marca, timeout=_ESPERA_CORREO)
 
 
 def _logout(page: Page) -> None:
