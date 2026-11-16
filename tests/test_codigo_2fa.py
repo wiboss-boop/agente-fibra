@@ -6,7 +6,7 @@ import imaplib
 import unittest
 
 from src.scrapers.codigo_2fa import (
-    BuzonCodigos, Codigo2FAError, codigo_del_mensaje, direccion_tecnico, extraer_codigo,
+    BuzonCodigos, Codigo2FAError, CodigoNoLlego, codigo_del_mensaje, direccion_tecnico, extraer_codigo,
 )
 
 # Como el correo real de Orange (16-nov-2026), con un código inventado
@@ -126,7 +126,7 @@ class Buzon(unittest.TestCase):
     def test_no_llega(self):
         imap = ImapFalso({"INBOX": []})
         reloj = iter(range(0, 1000, 10))
-        with self.assertRaisesRegex(Codigo2FAError, "No llegó"):
+        with self.assertRaisesRegex(CodigoNoLlego, "No llegó"):
             _buzon(imap).esperar_codigo("buzon+hans@example.com", {"INBOX": 0}, timeout=30,
                                         dormir=lambda s: None, reloj=lambda: next(reloj))
 
