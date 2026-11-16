@@ -4,12 +4,14 @@ URL: https://polar-tecnicos.orange.es
 
 Usa el mismo motor que Kairos (mismos selectores de login y estructura de URLs):
   - Login: #usuario / #password / #bt_login
+  - Doble factor (nov-2026): #form-2FA; el código llega por correo y se lee con codigo_2fa.py
   - Órdenes del día: href /Dashboard/Detalle?codigoOt=XXXX en el dashboard
   - Logout: /Dashboard/Logout
 """
 
 import logging
 import re
+import time
 import unicodedata
 from datetime import date
 from pathlib import Path
@@ -19,12 +21,16 @@ import yaml
 from playwright.sync_api import sync_playwright, Page, TimeoutError as PWTimeout
 
 from src.scrapers import fallos
+from src.scrapers.codigo_2fa import BuzonCodigos, Codigo2FAError
 
 logger = logging.getLogger(__name__)
 
 _CONFIG_PATH = Path("config/credentials.yaml")
 _BASE_URL = "https://polar-tecnicos.orange.es"
 _TIMEOUT = 30_000
+# Polar recuerda el método de doble factor en esta cookie (la pone su fa2.js al elegirlo).
+_COOKIE_2FA_CORREO = {"name": "fa2prov", "value": "email",
+                      "domain": "polar-tecnicos.orange.es", "path": "/"}
 
 
 def load_technicians(config_path: Path = _CONFIG_PATH) -> List[dict]:
@@ -83,12 +89,14 @@ def _process_technician(
     logger.info("Orange → %s (%s)", name, tech["orange_user"])
 
     context = browser.new_context(accept_downloads=True)
+    context.add_cookies([_COOKIE_2FA_CORREO])
     page = context.new_page()
     downloaded: List[Path] = []
     incidencias: List[dict] = []
 
     try:
-        _login(page, tech["orange_user"], tech["orange_pass"])
+        _login(page, tech["orange_user"], tech["orange_pass"], nombre=name,
+               correo_2fa=tech.get("orange_2fa_email"))
         order_ids = _get_order_ids(page, target_date)
         logger.info("Orange / %s: %d órdenes encontradas", name, len(order_ids))
         dashboard = page.content()
@@ -144,7 +152,8 @@ def _process_technician(
 # Login / logout
 # ---------------------------------------------------------------------------
 
-def _login(page: Page, username: str, password: str) -> None:
+def _login(page: Page, username: str, password: str, nombre: str = "",
+           correo_2fa: Optional[str] = None) -> None:
     logger.debug("Orange: login como %s", username)
     page.goto(_BASE_URL, timeout=_TIMEOUT)
     page.wait_for_load_state("networkidle", timeout=_TIMEOUT)
@@ -160,7 +169,17 @@ def _login(page: Page, username: str, password: str) -> None:
     page.locator("#password").click()
     page.locator("#password").clear()
     page.keyboard.type(password)
+
+    # La marca se toma ANTES de «Entrar»: el correo con el código sale en cuanto Polar lo pide
+    buzon, marca, aviso_buzon = _preparar_2fa()
     page.click("#bt_login")
+
+    if _esperar_dashboard_o_2fa(page) == "2fa":
+        _pasar_2fa(page, username, nombre, correo_2fa, buzon, marca, aviso_buzon)
+        return
+    if "/Dashboard" in page.url:
+        logger.debug("Orange: login OK")
+        return
 
     # Cerrar aviso de cambio de contraseña si aparece
     try:
@@ -175,11 +194,79 @@ def _login(page: Page, username: str, password: str) -> None:
         page.wait_for_url("**/Dashboard**", timeout=15_000)
         logger.debug("Orange: login OK")
     except PWTimeout:
-        error_msg = ""
+        raise fallos.LoginFallido(f"Login fallido para {username}: "
+                                  f"{_mensaje_error(page) or 'credenciales incorrectas'}")
+
+
+def _mensaje_error(page: Page) -> str:
+    try:
         err = page.locator(".alert-danger, [class*='error']")
         if err.count() > 0:
-            error_msg = err.first.inner_text().strip()
-        raise fallos.LoginFallido(f"Login fallido para {username}: {error_msg or 'credenciales incorrectas'}")
+            return err.first.inner_text().strip()
+    except Exception:
+        pass
+    return ""
+
+
+def _preparar_2fa() -> "Tuple[Optional[BuzonCodigos], Optional[dict], Optional[str]]":
+    """Buzón de códigos y su marca. Si no se puede abrir, el fallo solo cuenta si Polar pide el código."""
+    try:
+        buzon = BuzonCodigos()
+        return buzon, buzon.marca(), None
+    except Codigo2FAError as exc:
+        return None, None, str(exc)
+
+
+def _esperar_dashboard_o_2fa(page: Page, timeout: float = 20) -> Optional[str]:
+    fin = time.monotonic() + timeout
+    while time.monotonic() < fin:
+        if "/Dashboard" in page.url:
+            return "dashboard"
+        try:
+            if page.locator("#form-2FA").is_visible():
+                return "2fa"
+        except Exception:
+            pass  # la página está navegando
+        page.wait_for_timeout(500)
+    return None
+
+
+def _pasar_2fa(page: Page, username: str, nombre: str, correo: Optional[str],
+               buzon: Optional[BuzonCodigos], marca: Optional[dict], aviso_buzon: Optional[str]) -> None:
+    """Polar pide el código de doble factor: se pide por correo y se lee del buzón común."""
+    if buzon is None or marca is None:
+        raise fallos.LoginFallido(f"Polar pide código 2FA a {username} y no se puede leer el correo: "
+                                  f"{aviso_buzon}")
+    correo = correo or buzon.direccion(nombre or username)
+
+    proveedor = (page.locator("#hdnProveedor2FA").input_value() or "").strip()
+    if proveedor.lower() != "email":
+        logger.info("Orange: el 2FA de %s sale por %s; se cambia a correo", username, proveedor or "?")
+        marca = buzon.marca()
+        page.click("#mostrarOpcionesFA2")
+        opcion = page.locator("#Email-option")
+        try:
+            opcion.wait_for(state="visible", timeout=15_000)
+        except PWTimeout:
+            raise fallos.LoginFallido(f"Polar pide 2FA por {proveedor} a {username} "
+                                      f"y la cuenta no ofrece el correo") from None
+        opcion.click()
+        page.locator("#form-2FA").wait_for(state="visible", timeout=15_000)
+
+    logger.info("Orange: esperando el código 2FA de %s en %s", username, correo)
+    try:
+        codigo = buzon.esperar_codigo(correo, marca)
+    except Codigo2FAError as exc:
+        raise fallos.LoginFallido(f"2FA de {username}: {exc}") from None
+
+    page.locator("#txtCodigo2FA").fill(codigo)
+    page.click("#btnAceptar2FA")
+    try:
+        page.wait_for_url("**/Dashboard**", timeout=20_000)
+    except PWTimeout:
+        raise fallos.LoginFallido(f"Polar no aceptó el código 2FA de {username}: "
+                                  f"{_mensaje_error(page) or 'sin mensaje'}") from None
+    logger.info("Orange: %s dentro con 2FA por correo", username)
 
 
 def _logout(page: Page) -> None:
